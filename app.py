@@ -1246,6 +1246,18 @@ def os_edit(os_id):
         pay_method = (request.form.get("pay_method") or (o["pay_method"] or "Dinheiro")).strip()
         pay_status = (request.form.get("pay_status") or (o["pay_status"] or "Pendente")).strip()
 
+        created_at_raw = (request.form.get("created_at") or "").strip()
+        if created_at_raw:
+            # HTML datetime-local: "YYYY-MM-DDTHH:MM" (às vezes sem segundos)
+            try:
+                dt = datetime.datetime.fromisoformat(created_at_raw.replace("Z", ""))
+                created_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                created_at = o["created_at"]
+        else:
+            created_at = o["created_at"]
+
+
         notes = (request.form.get("notes") or "").strip()
         base_labor = float(request.form.get("labor") or 0)
 
@@ -1361,11 +1373,12 @@ def os_edit(os_id):
                     title=f"Editar OS #{os_id}",
                 )
 
-# 4) Atualiza a OS (mantém created_at)
+# 4) Atualiza a OS
         db.execute(
             """
             UPDATE orders
-               SET vehicle_id = ?,
+               SET created_at = ?,
+                   vehicle_id = ?,
                    status = ?,
                    notes = ?,
                    labor = ?,
@@ -1374,7 +1387,7 @@ def os_edit(os_id):
                    pay_status = ?
              WHERE id = ?
             """,
-            (vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
+            (created_at, vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
         )
 
         # 5) Reinsere itens (peças e serviços extras)
