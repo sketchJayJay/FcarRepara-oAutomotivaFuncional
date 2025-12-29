@@ -64,11 +64,6 @@
     <!-- Veículo + mão de obra -->
     <div class="flex gap" style="margin-top: 10px">
       <div>
-        <label>Data da OS</label>
-        <input class="field" type="datetime-local" name="created_at" value="{{ ((o.created_at or '')|replace(' ', 'T'))[:16] }}">
-      </div>
-
-      <div>
         <label>Placa</label>
         <input class="field" name="vehicle_plate" value="{{ o.plate or '' }}">
       </div>

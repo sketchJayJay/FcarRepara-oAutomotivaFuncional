@@ -11,10 +11,10 @@ try:
 except Exception:
     qrcode = None
 APP_TITLE = "FCAR Reparação Automotiva"
-DB_PATH = os.environ.get("FCAR_DB_PATH") or os.path.join(os.path.dirname(__file__), "oficina.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "oficina.db")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-2cp-mec")
+app.secret_key = "dev-2cp-mec"
 
 def get_db():
     db = getattr(g, "_db", None)
@@ -852,6 +852,7 @@ def os_view(os_id):
         WHERE i.order_id=?
         ORDER BY i.id
     """, (os_id,)).fetchall()
+    its = [dict(r) for r in its]  # garante .get() nos itens (sqlite3.Row -> dict)
 
     pecas = [r for r in its if int(r.get("is_labor") or 0) == 0]
     servicos_itens = [r for r in its if int(r.get("is_labor") or 0) == 1]
@@ -1246,18 +1247,6 @@ def os_edit(os_id):
         pay_method = (request.form.get("pay_method") or (o["pay_method"] or "Dinheiro")).strip()
         pay_status = (request.form.get("pay_status") or (o["pay_status"] or "Pendente")).strip()
 
-        created_at_raw = (request.form.get("created_at") or "").strip()
-        if created_at_raw:
-            # HTML datetime-local: "YYYY-MM-DDTHH:MM" (às vezes sem segundos)
-            try:
-                dt = datetime.datetime.fromisoformat(created_at_raw.replace("Z", ""))
-                created_at = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                created_at = o["created_at"]
-        else:
-            created_at = o["created_at"]
-
-
         notes = (request.form.get("notes") or "").strip()
         base_labor = float(request.form.get("labor") or 0)
 
@@ -1373,12 +1362,11 @@ def os_edit(os_id):
                     title=f"Editar OS #{os_id}",
                 )
 
-# 4) Atualiza a OS
+# 4) Atualiza a OS (mantém created_at)
         db.execute(
             """
             UPDATE orders
-               SET created_at = ?,
-                   vehicle_id = ?,
+               SET vehicle_id = ?,
                    status = ?,
                    notes = ?,
                    labor = ?,
@@ -1387,7 +1375,7 @@ def os_edit(os_id):
                    pay_status = ?
              WHERE id = ?
             """,
-            (created_at, vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
+            (vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
         )
 
         # 5) Reinsere itens (peças e serviços extras)
@@ -2505,7 +2493,7 @@ def qr_generic():
     return _qr_image(data)
 
 @app.route("/qr/os/<int:os_id>")
-def qr_os_alt(os_id):
+def qr_os(os_id):
     url = url_for("os_view", os_id=os_id, _external=True)
     return _qr_image(url)
 
