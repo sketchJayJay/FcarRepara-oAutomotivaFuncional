@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-xl font-semibold headline">Clientes</h1>
+  <form method="get" class="flex items-center gap-2">
+    <input class="field" type="text" name="q" placeholder="Buscar por nome/telefone/CPF" value="{{ q or '' }}">
+    <button class="btn">Buscar</button>
+  </form>
+</div>
+
+<div class="grid md:grid-cols-3 gap-4">
+  <div class="glass p-4">
+    <h2 class="font-semibold mb-2">Novo Cliente</h2>
+    <form method="post" class="space-y-2">
+      <input class="field" name="name" placeholder="Nome completo" required>
+      <input class="field" name="phone" placeholder="Telefone">
+      <input class="field" name="cpf" placeholder="CPF">
+      <input class="field" name="address" placeholder="Endereço">
+      <button class="btn w-full">Salvar</button>
+    </form>
+  </div>
+
+  <div class="glass p-4 md:col-span-2">
+    <table class="text-sm w-full">
+      <thead>
+        <tr>
+          <th class="text-left">Nome</th>
+          <th class="text-left">Telefone</th>
+          <th class="text-left">CPF</th>
+          <th class="text-right">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r['name'] }}</td>
+          <td>{{ r['phone'] or '-' }}</td>
+          <td>{{ r['cpf'] or '-' }}</td>
+          <td class="text-right">
+            <a class="btn alt" href="{{ url_for('veiculos', client_id=r['id']) }}">Abrir painel</a>
+            <a class="btn" href="{{ url_for('cliente_edit', cid=r['id']) }}">Editar</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="muted">Sem clientes.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

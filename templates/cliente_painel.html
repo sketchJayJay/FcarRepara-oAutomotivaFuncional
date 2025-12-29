@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-semibold">
+      Painel do Cliente – {{ c.name }}
+    </h1>
+    <div class="space-x-2">
+      <a href="{{ url_for('clientes') }}"
+         class="px-3 py-1 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-sm">
+        Voltar
+      </a>
+      <a href="{{ url_for('cliente_edit', cid=c.id) }}"
+         class="px-3 py-1 rounded-xl bg-red-500 hover:bg-red-600 text-sm">
+        Editar cliente
+      </a>
+    </div>
+  </div>
+
+  <!-- Dados do cliente -->
+  <div class="mb-6 border border-zinc-800 rounded-2xl p-4 bg-black/40">
+    <h2 class="text-lg font-semibold mb-3">Dados do cliente</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+      <p><span class="text-zinc-400">Telefone:</span> {{ c.phone or '-' }}</p>
+      <p><span class="text-zinc-400">CPF/CNPJ:</span> {{ c.cpf or '-' }}</p>
+      <p class="md:col-span-2"><span class="text-zinc-400">Endereço:</span> {{ c.address or '-' }}</p>
+    </div>
+  </div>
+
+  <!-- Veículos do cliente -->
+  <div class="mb-6 border border-zinc-800 rounded-2xl p-4 bg-black/40">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">Veículos do cliente</h2>
+      <!-- formulário simples para adicionar veículo -->
+    </div>
+
+    {% if vs %}
+    <table class="w-full text-sm mb-4">
+      <thead class="text-zinc-400 border-b border-zinc-700">
+        <tr>
+          <th class="text-left py-1">Placa</th>
+          <th class="text-left py-1">Modelo</th>
+          <th class="text-left py-1">Ano</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in vs %}
+        <tr class="border-b border-zinc-800">
+          <td class="py-1">{{ v.plate or '-' }}</td>
+          <td class="py-1">{{ v.model or '-' }}</td>
+          <td class="py-1">{{ v.year or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="text-sm text-zinc-400 mb-4">Nenhum veículo cadastrado para este cliente.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('veiculos', client_id=c.id) }}" class="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
+      <input type="hidden" name="from_painel" value="1">
+      <div>
+        <label class="block text-xs mb-1">Placa</label>
+        <input name="plate" maxlength="10" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-sm uppercase" placeholder="ABC1D23">
+      </div>
+      <div class="md:col-span-2">
+        <label class="block text-xs mb-1">Modelo</label>
+        <input name="model" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-sm" placeholder="Modelo / Motor / Obs">
+      </div>
+      <div>
+        <label class="block text-xs mb-1">Ano</label>
+        <input name="year" type="number" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-sm" placeholder="2020">
+      </div>
+      <div class="md:col-span-4 text-right mt-2">
+        <button type="submit" class="px-4 py-1 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">
+          + Adicionar veículo
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Histórico de OS -->
+  <div class="border border-zinc-800 rounded-2xl p-4 bg-black/40">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">Histórico de OS</h2>
+      <a href="{{ url_for('os_new') }}?client_id={{ c.id }}"
+         class="px-3 py-1 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-sm">
+        + Nova OS para este cliente
+      </a>
+    </div>
+
+    {% if os_rows %}
+    <table class="w-full text-sm">
+      <thead class="text-zinc-400 border-b border-zinc-700">
+        <tr>
+          <th class="text-left py-1">ID</th>
+          <th class="text-left py-1">Data</th>
+          <th class="text-left py-1">Veículo</th>
+          <th class="text-left py-1">Mecânico</th>
+          <th class="text-left py-1">Status</th>
+          <th class="text-right py-1">Total</th>
+          <th class="text-right py-1">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in os_rows %}
+        <tr class="border-b border-zinc-800">
+          <td class="py-1">#{{ o.id }}</td>
+          <td class="py-1">{{ o.created_at[:10] }}</td>
+          <td class="py-1">
+            {{ o.plate or '-' }}
+            {% if o.model %} – {{ o.model }}{% endif %}
+          </td>
+          <td class="py-1">{{ o.mech or '-' }}</td>
+          <td class="py-1">{{ o.status }}</td>
+          <td class="py-1 text-right">R$ {{ '%.2f'|format(o.total_geral or 0) }}</td>
+          <td class="py-1 text-right space-x-1">
+            <a href="{{ url_for('os_view', os_id=o.id) }}"
+               class="px-2 py-1 rounded-lg bg-red-500 text-xs">Ver</a>
+            <a href="{{ url_for('os_print', os_id=o.id) }}"
+               class="px-2 py-1 rounded-lg bg-zinc-700 text-xs" target="_blank">Imprimir</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="text-sm text-zinc-400">Nenhuma OS encontrada para este cliente.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

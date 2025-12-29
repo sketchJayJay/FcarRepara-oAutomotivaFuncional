@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - FCAR Reparação Automotiva</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: radial-gradient(1200px 500px at 20% -10%, rgba(239,68,68,0.10), transparent),
+                  radial-gradient(1200px 500px at 90% -10%, rgba(239,68,68,0.06), transparent),
+                  #0a0a0a;
+      color: #e5e7eb;
+      min-height: 100vh;
+    }
+    .glass {
+      background: rgba(15,15,16,0.95);
+      border-radius: 18px;
+      border: 1px solid rgba(239,68,68,0.4);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+    }
+    .field {
+      background:#020617;
+      border:1px solid rgba(148,163,184,0.6);
+      padding:10px 12px;
+      border-radius: 12px;
+      width:100%;
+      color:#e5e7eb;
+    }
+    .btn {
+      background:#ef4444;
+      padding:10px 16px;
+      border-radius:12px;
+      color:white;
+      font-weight:700;
+      width:100%;
+    }
+    .btn:hover { background:#dc2626; }
+  </style>
+</head>
+<body class="flex items-center justify-center px-4">
+  <div class="max-w-sm w-full glass p-6 space-y-4">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="h-10 w-10 rounded-xl bg-red-600 flex items-center justify-center font-bold text-white shadow-lg">FCAR</div>
+      <div>
+        <h1 class="text-lg font-semibold">FCAR Reparação Automotiva</h1>
+        <p class="text-xs text-slate-400">Área restrita - faça login para acessar o sistema</p>
+      </div>
+    </div>
+    {% if error %}
+      <div class="text-sm text-red-300 bg-red-900/30 border border-red-500/60 rounded-lg px-3 py-2">
+        {{ error }}
+      </div>
+    {% endif %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+        <div class="text-sm {{ 'text-green-300 bg-emerald-900/30 border border-emerald-500/60' if cat=='ok' else 'text-red-300 bg-red-900/30 border border-red-500/60' }} rounded-lg px-3 py-2 mb-1">
+          {{ msg }}
+        </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <form method="post" class="space-y-3">
+      <div>
+        <label class="block text-sm mb-1">Usuário</label>
+        <input type="text" name="username" class="field" autocomplete="username" required>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Senha</label>
+        <input type="password" name="password" class="field" autocomplete="current-password" required>
+      </div>
+      <button class="btn mt-2">Entrar</button>
+      <p class="text-[11px] text-slate-500 text-center mt-1">
+        Usuário padrão: <span class="font-mono text-slate-300">admin</span> •
+        Senha: <span class="font-mono text-slate-300">1234</span>
+      </p>
+    </form>
+  </div>
+</body>
+</html>

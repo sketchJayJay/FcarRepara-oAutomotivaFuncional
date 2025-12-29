@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block body %}
+<h1 class="text-2xl font-semibold headline mb-4">Agenda de Serviços</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="glass p-4">
+    <h2 class="text-lg font-semibold mb-2">Novo agendamento</h2>
+    <form method="post" class="space-y-3">
+      <div>
+        <label class="block text-sm mb-1">Cliente *</label>
+        <input type="text" id="clienteSearch" class="field mb-2" placeholder="Buscar cliente..." autocomplete="off">
+        <select name="client_id" id="clienteSelect" class="field" required>
+          <option value="">Selecione</option
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm mb-1">Veículo</label>
+        <select name="vehicle_id" class="field">
+          <option value="">Nenhum</option>
+          {% for v in vehicles %}
+          <option value="{{ v.id }}">{{ v.plate }} - {{ v.model }} ({{ v.client_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm mb-1">Mecânico</label>
+        <select name="mechanic_id" class="field">
+          <option value="">Nenhum</option>
+          {% for m in mechs %}
+          <option value="{{ m.id }}">{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-sm mb-1">Data *</label>
+          <input type="date" name="date" class="field" required>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Hora *</label>
+          <input type="time" name="time" class="field" required>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm mb-1">Observações</label>
+        <textarea name="notes" class="field" rows="3"></textarea>
+      </div>
+
+      <button class="btn mt-2">Salvar e enviar WhatsApp</button>
+    </form>
+  </div>
+
+  <div class="glass p-4 overflow-x-auto">
+    <h2 class="text-lg font-semibold mb-2">Agendamentos</h2>
+    <table class="text-sm">
+      <thead>
+        <tr class="text-left text-xs uppercase text-gray-400">
+          <th>Data</th>
+          <th>Hora</th>
+          <th>Cliente</th>
+          <th>Veículo</th>
+          <th>Mecânico</th>
+          <th>WhatsApp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in rows %}
+        <tr>
+          <td>{{ a.date }}</td>
+          <td>{{ a.time }}</td>
+          <td>{{ a.client_name }}</td>
+          <td>{{ (a.plate or '-') ~ (' - ' ~ a.model if a.model else '') }}</td>
+          <td>{{ a.mech or '-' }}</td>
+          <td>
+            <a href="{{ url_for('enviar_whatsapp_agenda', aid=a.id) }}"
+               class="btn btn-sm"
+               style="padding:4px 10px;">
+              WhatsApp
+            </a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="muted py-4">Nenhum agendamento cadastrado.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const search = document.getElementById('clienteSearch');
+  const select = document.getElementById('clienteSelect');
+  if (!search || !select) return;
+  const allOptions = Array.from(select.options);
+
+  search.addEventListener('input', function () {
+    const term = this.value.toLowerCase();
+    select.innerHTML = '';
+    allOptions.forEach(function (opt) {
+      if (!term || opt.text.toLowerCase().includes(term)) {
+        select.appendChild(opt);
+      }
+    });
+    if (select.options.length > 0) {
+      select.selectedIndex = 0;
+    }
+  });
+});
+</script>
+
+{% endblock %}

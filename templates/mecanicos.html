@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-xl font-semibold headline">Mecânicos</h1>
+</div>
+<div class="grid md:grid-cols-3 gap-4">
+  <div class="glass p-4">
+    <h2 class="font-semibold mb-2">Novo mecânico</h2>
+    <form method="post" class="space-y-2">
+      <input class="field" name="name" placeholder="Nome do mecânico" required>
+      <button class="btn w-full">Adicionar</button>
+    </form>
+    <p class="text-xs muted mt-2">
+      Os mecânicos cadastrados aqui aparecem na abertura/edição de OS e no relatório por mecânico.
+    </p>
+  </div>
+  <div class="glass p-4 md:col-span-2 overflow-x-auto">
+    <h2 class="font-semibold mb-2">Mecânicos cadastrados</h2>
+    <table class="text-sm w-full">
+      <thead>
+        <tr>
+          <th class="text-left">ID</th>
+          <th class="text-left">Nome</th>
+          <th class="text-right">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in rows %}
+        <tr>
+          <td class="py-1 text-xs text-slate-400">#{{ m['id'] }}</td>
+          <td class="py-1">{{ m['name'] }}</td>
+          <td class="py-1 text-right">
+            <form method="post"
+                  action="{{ url_for('mecanico_excluir', mech_id=m['id']) }}"
+                  class="inline js-delete-form"
+                  data-msg="Excluir mecânico {{ m['name'] }}?">
+              <button class="btn danger btn-sm">Remover</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" class="py-3 muted">Nenhum mecânico cadastrado ainda.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

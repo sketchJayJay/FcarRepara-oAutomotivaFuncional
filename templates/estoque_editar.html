@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-3xl mx-auto py-6 text-gray-100">
+  <h1 class="text-2xl font-semibold mb-4">Editar item de estoque</h1>
+
+  <form method="post"
+        class="rounded-2xl bg-black/40 border border-zinc-800 p-4 text-sm grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="md:col-span-2">
+      <label class="block text-xs text-gray-400">Nome da peça / serviço</label>
+      <input type="text" name="name" value="{{ item.name }}" required
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400">SKU / Código</label>
+      <input type="text" name="sku" value="{{ item.sku or '' }}"
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs uppercase">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400">Estoque atual</label>
+      <input type="number" step="1" name="stock" value="{{ item.stock }}"
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400">Estoque mínimo</label>
+      <input type="number" step="1" name="min_stock" value="{{ item.min_stock }}"
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400">Preço de venda (R$)</label>
+      <input type="number" step="0.01" name="price" value="{{ item.price }}"
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400">Custo (quanto você paga) (R$)</label>
+      <input type="number" step="0.01" name="cost_price" value="{{ item.cost_price or 0 }}"
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400">Valor de repasse (R$)</label>
+      <input type="number" step="0.01" name="repasse_value" value="{{ item.repasse_value or 0 }}"
+             class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-1 text-xs">
+    </div>
+    <div class="flex items-center gap-2 mt-4">
+      <input type="hidden" name="is_labor" value="0">
+      <input id="is_labor" type="checkbox" name="is_labor" value="1"
+             {% if item.is_labor %}checked{% endif %}
+             class="rounded border-zinc-600 bg-black/40">
+      <label for="is_labor" class="text-xs text-gray-300">
+        Este item é mão de obra (serviço)
+      </label>
+    </div>
+    <div class="md:col-span-2 flex justify-between mt-4">
+      <a href="{{ url_for('estoque') }}"
+         class="px-4 py-1.5 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-xs">
+        Voltar
+      </a>
+      <button type="submit"
+              class="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-xs font-semibold">
+        Salvar alterações
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

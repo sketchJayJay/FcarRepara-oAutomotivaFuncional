@@ -1,0 +1,4 @@
+<!-- Use esta <img> no seu templates/os_view.html caso prefira não substituir o arquivo inteiro -->
+<img
+  src="{{ url_for('qrimg', data=( url_for('os_access', os_id=o['id'], _external=True)         | replace('127.0.0.1', request.host.split(':')[0])         | replace('localhost', request.host.split(':')[0]) )) }}"
+  alt="QR OS" class="bg-white p-3 rounded-xl" style="width:240px;height:240px;">

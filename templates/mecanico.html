@@ -1,0 +1,52 @@
+
+{% extends "base.html" %}
+{% block body %}
+<h1 class="text-xl font-semibold mb-4 headline">Modo Mecânico — Buscar OS por <span class="font-mono">placa</span></h1>
+
+<form method="get" action="{{ url_for('mecanico') }}" class="glass p-4 mb-4 flex flex-wrap items-end gap-3">
+  <div>
+    <label class="label">Placa do veículo</label>
+    <input type="text" name="placa" value="{{ placa or '' }}" class="field" placeholder="Ex.: ABC1D23 ou ABC-1234" autofocus oninput="this.value=this.value.toUpperCase()">
+    <p class="text-xs muted mt-1">Dica: pode digitar com ou sem hífen — a busca normaliza.</p>
+  </div>
+  <div>
+    <button class="btn">Buscar</button>
+  </div>
+</form>
+
+{% if rows and rows|length > 0 %}
+<div class="glass p-4">
+  <table class="w-full text-sm">
+    <thead class="text-left muted border-b border-white/10">
+      <tr>
+        <th class="py-2">OS</th>
+        <th>Placa</th>
+        <th>Cliente</th>
+        <th>Status</th>
+        <th>Data</th>
+        <th class="text-right">Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="border-b border-white/5">
+        <td class="py-2">#{{ r['id'] }}</td>
+        <td class="font-mono">{{ r['plate'] or '-' }}</td>
+        <td>{{ r['client_name'] }}</td>
+        <td>{{ r['status'] }}</td>
+        <td>{{ r['created_at'] }}</td>
+        <td class="text-right">
+          <a href="{{ url_for('os_view', os_id=r['id']) }}" class="btn btn-sm">Abrir OS</a>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif placa %}
+<div class="glass p-4">
+  <p class="text-sm">Nenhuma OS encontrada para a placa <span class="font-mono">{{ placa }}</span>.</p>
+</div>
+{% endif %}
+
+{% endblock %}

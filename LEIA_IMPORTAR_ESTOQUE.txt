@@ -1,0 +1,16 @@
+FCAR - Importar Estoque (Corrigido)
+
+1) Rode o FCAR pelo menos 1 vez para criar o arquivo 'oficina.db'.
+2) Para criar/abrir o arquivo de estoque:
+   - Execute: CRIAR_ESTOQUE_CSV.bat
+   - Preencha e SALVE o estoque.csv
+3) Para importar:
+   - Execute: IMPORTAR_ESTOQUE.bat
+
+DICA: Se voce ja tiver um CSV com outro nome, basta colocar na pasta e rodar IMPORTAR_ESTOQUE.bat.
+O importador vai:
+- usar automaticamente o unico CSV que encontrar, OU
+- se tiver varios CSV, vai usar o mais recente e mostrar como escolher outro.
+
+Tambem e possivel escolher direto:
+python importar_estoque_csv.py "meu_estoque.csv"

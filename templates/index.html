@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block body %}
+
+<div class="flex items-start justify-between gap-3 mb-4">
+  <div>
+    <h1 class="text-2xl font-semibold headline">Painel</h1>
+    <p class="muted text-sm">Atalhos rápidos para tudo que você usa no dia a dia.</p>
+  </div>
+
+  <div class="flex gap-2">
+    <a href="{{ url_for('os_new') }}" class="btn">+ Nova OS</a>
+    <a href="{{ url_for('agenda') }}" class="btn">+ Agendar</a>
+  </div>
+</div>
+
+<!-- CARDS / ATALHOS -->
+<div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+
+  <a href="{{ url_for('clientes') }}" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Clientes</div>
+      <div class="text-xl">👥</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Cadastros</div>
+    <div class="text-sm muted mt-1">Criar, editar e acessar painel do cliente</div>
+  </a>
+
+  <a href="{{ url_for('os_list') }}" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Ordens de Serviço</div>
+      <div class="text-xl">🧾</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">OS</div>
+    <div class="text-sm muted mt-1 flex items-center gap-2">
+      <span>Abertas:</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-white/10 ring-1 ring-white/10">{{ open_os|length }}</span>
+    </div>
+  </a>
+
+  <a href="{{ url_for('estoque') }}" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Estoque</div>
+      <div class="text-xl">📦</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Peças</div>
+    <div class="text-sm muted mt-1 flex items-center gap-2">
+      <span>Baixo:</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-white/10 ring-1 ring-white/10">{{ low|length }}</span>
+    </div>
+  </a>
+
+  <a href="{{ url_for('agenda') }}" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Agenda</div>
+      <div class="text-xl">📅</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Atendimentos</div>
+    <div class="text-sm muted mt-1">Ver e criar agendamentos</div>
+  </a>
+
+  <a href="{{ url_for('mecanicos') }}" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Mecânicos</div>
+      <div class="text-xl">🧰</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Equipe</div>
+    <div class="text-sm muted mt-1">Cadastro e gerenciamento</div>
+  </a>
+
+  <a href="{{ url_for('relatorio_mecanicos') }}" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Relatórios</div>
+      <div class="text-xl">📈</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Mecânicos</div>
+    <div class="text-sm muted mt-1">Total por mecânico e período</div>
+  </a>
+
+  <!-- Financeiro (se existir no seu projeto atual, abre direto) -->
+  <a href="/financeiro" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Financeiro</div>
+      <div class="text-xl">💰</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Dashboard</div>
+    <div class="text-sm muted mt-1">Entradas, saídas e métodos</div>
+  </a>
+
+  <!-- Extrato de estoque (se existir no seu projeto atual) -->
+  <a href="/financeiro/estoque" class="glass p-4 hover:shadow-lg transition block">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Extrato</div>
+      <div class="text-xl">🧾</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">Estoque</div>
+    <div class="text-sm muted mt-1">Entradas x Saídas (por período)</div>
+  </a>
+
+  {% if has_acesso %}
+  <a href="{{ url_for('acesso') }}" class="glass p-4 hover:shadow-lg transition block lg:col-span-2">
+    <div class="flex items-center justify-between">
+      <div class="text-sm muted">Acesso (QR)</div>
+      <div class="text-xl">📲</div>
+    </div>
+    <div class="mt-2 font-semibold text-lg">QR Code</div>
+    <div class="text-sm muted mt-1">Abrir painel de acesso e QR de conexão</div>
+  </a>
+  {% endif %}
+
+</div>
+
+<!-- VISÃO GERAL -->
+<div class="grid lg:grid-cols-2 gap-4">
+  <div class="glass p-4">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <h2 class="font-semibold">OS em aberto</h2>
+      <div class="flex gap-2">
+        <a class="btn" href="{{ url_for('os_new') }}">+ Nova OS</a>
+        <a class="btn" href="{{ url_for('os_list') }}">Ver todas</a>
+      </div>
+    </div>
+
+    <table class="text-sm w-full">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Cliente</th>
+          <th>Mecânico</th>
+          <th>Status</th>
+          <th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in open_os %}
+        {% set st = o['status'] %}
+        <tr>
+          <td><a class="text-red-300 hover:underline" href="{{ url_for('os_view', os_id=o['id']) }}">#{{ o['id'] }}</a></td>
+          <td>{{ o['client_name'] }}</td>
+          <td>{{ o['mech'] or '-' }}</td>
+          <td>
+            {% if st == 'Aberta' %}
+              <span class="px-2 py-1 rounded-full text-xs bg-white/10 ring-1 ring-white/10">Aberta</span>
+            {% elif st == 'Em andamento' %}
+              <span class="px-2 py-1 rounded-full text-xs bg-white/10 ring-1 ring-white/10">Em andamento</span>
+            {% else %}
+              <span class="px-2 py-1 rounded-full text-xs bg-white/10 ring-1 ring-white/10">{{ st }}</span>
+            {% endif %}
+          </td>
+          <td class="muted">{{ (o['created_at'] or '')[:10] }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">Nenhuma OS em aberto.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="glass p-4">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <h2 class="font-semibold">Estoque baixo</h2>
+      <a class="btn" href="{{ url_for('estoque') }}">Abrir estoque</a>
+    </div>
+
+    <table class="text-sm w-full">
+      <thead><tr><th>Item</th><th>Estoque</th><th>Mín</th></tr></thead>
+      <tbody>
+        {% for it in low %}
+        <tr>
+          <td class="font-medium">{{ it['name'] }}</td>
+          <td>{{ it['stock'] }}</td>
+          <td class="muted">{{ it['min_stock'] }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="muted">Tudo ok no estoque.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

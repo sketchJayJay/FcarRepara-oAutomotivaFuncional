@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-semibold">Financeiro</h1>
+    <div class="flex gap-2">
+      <a href="{{ url_for('financeiro_lancamentos') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Lançamentos</a>
+      <a href="{{ url_for('financeiro_estoque') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Extrato Estoque</a>
+      <a href="{{ url_for('servico_avulso') }}" class="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">+ Serviço avulso</a>
+      <a href="{{ url_for('compras_list') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Compras</a>
+    </div>
+  </div>
+
+  <form method="get" class="rounded-2xl bg-black/40 border border-zinc-800 p-4 mb-6 flex flex-wrap gap-3 items-end text-sm">
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Início</div>
+      <input type="date" name="start" value="{{ start }}" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Fim</div>
+      <input type="date" name="end" value="{{ end }}" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <button class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-xs font-semibold">Filtrar</button>
+  </form>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Receitas (Efetivadas)</div>
+      <div class="text-2xl font-semibold mt-1">{{ receitas|money }}</div>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Despesas (Efetivadas)</div>
+      <div class="text-2xl font-semibold mt-1">{{ despesas|money }}</div>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Saldo</div>
+      <div class="text-2xl font-semibold mt-1">{{ saldo|money }}</div>
+      <div class="text-xs text-zinc-400 mt-2">
+        Pend. receber: <span class="text-zinc-200">{{ pend_receber|money }}</span> |
+        Pend. pagar: <span class="text-zinc-200">{{ pend_pagar|money }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold">Receitas x Despesas por mês</h2>
+      <div class="text-xs text-zinc-400">{{ chart_start }} a {{ chart_end }}</div>
+    </div>
+    <div class="h-72">
+      <canvas id="rxChart" class="w-full"></canvas>
+    </div>
+    <div class="text-xs text-zinc-500 mt-2">O gráfico soma apenas lançamentos EFETIVADOS.</div>
+  </div>
+
+
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold">Entradas por forma de pagamento (Efetivadas)</h2>
+      <div class="text-xs text-zinc-400">{{ start }} a {{ end }}</div>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+      {% for k in ["Dinheiro","Pix","Cartão Débito","Cartão Crédito"] %}
+      <div class="rounded-2xl bg-black/30 border border-zinc-800 p-3">
+        <div class="text-xs text-zinc-400">{{ k }}</div>
+        <div class="text-lg font-semibold mt-1">{{ (by_method.get(k,0))|money }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+    <h2 class="text-sm font-semibold mb-3">Últimos lançamentos</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-zinc-400">
+            <th class="py-2">Data</th>
+            <th>Tipo</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Pagamento</th>
+            <th class="text-right">Valor</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in last %}
+          <tr class="border-t border-zinc-800">
+            <td class="py-2">{{ r.date }}</td>
+            <td class="font-semibold">{% if r.ttype == 'IN' %}Entrada{% else %}Saída{% endif %}</td>
+            <td class="text-zinc-200">{{ r.description }}</td>
+            <td class="text-zinc-400">{{ r.cat_name or '-' }}</td>
+            <td class="text-zinc-400">{{ r.pm_name or '-' }}</td>
+            <td class="text-right font-semibold">{{ r.amount|money }}</td>
+            <td>
+              {% if r.status == 'EFETIVADO' %}
+                <span class="px-2 py-1 rounded-lg bg-emerald-600/30 border border-emerald-700 text-emerald-200 text-xs">EFETIVADO</span>
+              {% elif r.status == 'PENDENTE' %}
+                <span class="px-2 py-1 rounded-lg bg-amber-600/25 border border-amber-700 text-amber-200 text-xs">PENDENTE</span>
+              {% else %}
+                <span class="px-2 py-1 rounded-lg bg-zinc-700/40 border border-zinc-600 text-zinc-200 text-xs">CANCELADO</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not last %}
+          <tr><td colspan="7" class="py-3 text-zinc-400">Sem lançamentos no período.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+  (() => {
+    const el = document.getElementById('rxChart');
+    if (!el) return;
+
+    const labels = {{ monthly_labels|tojson }};
+    const receitas = {{ monthly_receitas|tojson }};
+    const despesas = {{ monthly_despesas|tojson }};
+    if (!labels || !labels.length) return;
+
+    const ctx = el.getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Receitas', data: receitas, borderWidth: 1 },
+          { label: 'Despesas', data: despesas, borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#e5e7eb' } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: R$ ${Number(ctx.raw || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#a1a1aa' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+          y: { ticks: { color: '#a1a1aa' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+        }
+      }
+    });
+  })();
+  </script>
+
+
+</div>
+{% endblock %}

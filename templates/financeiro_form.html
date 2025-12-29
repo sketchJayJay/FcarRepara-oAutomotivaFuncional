@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-3xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-semibold">{{ title }}</h1>
+    <a href="{{ url_for('financeiro_lancamentos') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Voltar</a>
+  </div>
+
+  <form method="post" class="rounded-2xl bg-black/40 border border-zinc-800 p-5 text-sm">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <div class="text-xs text-zinc-400 mb-1">Tipo</div>
+        <select name="ttype" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs" {% if row and row.ref_type in ['OS','PURCHASE'] %}disabled{% endif %}>
+          <option value="IN" {% if (row and row.ttype=='IN') or (not row) %}selected{% endif %}>Entrada</option>
+          <option value="OUT" {% if row and row.ttype=='OUT' %}selected{% endif %}>Saída</option>
+        </select>
+        {% if row and row.ref_type in ['OS','PURCHASE'] %}
+          <div class="text-[11px] text-zinc-500 mt-1">Esse lançamento é vinculado ({{ row.ref_type }}). Tipo/valor ficam travados.</div>
+        {% endif %}
+      </div>
+
+      <div>
+        <div class="text-xs text-zinc-400 mb-1">Status</div>
+        <select name="status" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+          {% for s in ["PENDENTE","EFETIVADO","CANCELADO"] %}
+            <option value="{{ s }}" {% if row and row.status==s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+          {% if not row %}
+            <option value="PENDENTE" selected>PENDENTE</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div>
+        <div class="text-xs text-zinc-400 mb-1">Data</div>
+        <input type="date" name="date" value="{{ row.date if row else '' }}" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+      </div>
+
+      <div>
+        <div class="text-xs text-zinc-400 mb-1">Vencimento</div>
+        <input type="date" name="due_date" value="{{ row.due_date if row else '' }}" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+      </div>
+
+      <div class="md:col-span-2">
+        <div class="text-xs text-zinc-400 mb-1">Descrição</div>
+        <input type="text" name="description" value="{{ row.description if row else '' }}" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm" {% if row and row.ref_type in ['OS','PURCHASE'] %}disabled{% endif %}>
+      </div>
+
+      <div>
+        <div class="text-xs text-zinc-400 mb-1">Valor</div>
+        <input type="number" step="0.01" name="amount" value="{{ row.amount if row else '' }}" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm" {% if row and row.ref_type in ['OS','PURCHASE'] %}disabled{% endif %}>
+      </div>
+
+      <div>
+        <div class="text-xs text-zinc-400 mb-1">Pagamento</div>
+        <select name="payment_method_id" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+          <option value="">-</option>
+          {% for m in methods %}
+            <option value="{{ m.id }}" {% if row and row.payment_method_id==m.id %}selected{% endif %}>{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="md:col-span-2">
+        <div class="text-xs text-zinc-400 mb-1">Categoria</div>
+        <select name="category_id" class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs" {% if row and row.ref_type in ['OS','PURCHASE'] %}disabled{% endif %}>
+          <option value="">-</option>
+          {% for c in cats %}
+            <option value="{{ c.id }}" {% if row and row.category_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="mt-5 flex justify-end gap-2">
+      <button class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">Salvar</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

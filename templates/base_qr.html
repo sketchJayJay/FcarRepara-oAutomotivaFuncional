@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title if title else "FCAR Reparação Automotiva" }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{
+      --brand:#ef4444; --brand-600:#dc2626; --ink:#e5e7eb; --muted:#cbd5e1;
+    }
+    @media print {
+      .noprint { display: none !important; }
+      .wm-print-only { display: block !important; opacity: 0.09; position: fixed; inset: 10% 0 auto 0; text-align: center; }
+      body { background:#fff !important; color:#000 !important; }
+    }
+    .wm-print-only { display:none; }
+    body {
+      background: radial-gradient(1200px 500px at 20% -10%, rgba(239,68,68,0.10), transparent),
+                  radial-gradient(1200px 500px at 90% -10%, rgba(239,68,68,0.06), transparent),
+                  #0a0a0a;
+      color: var(--ink);
+    }
+    .glass { background: rgba(255,255,255,0.04); border: 1px solid rgba(239,68,68,0.20); border-radius: 16px; box-shadow: 0 10px 30px rgba(239,68,68,0.12), inset 0 0 0 1px rgba(255,255,255,0.02); }
+    .field { background:#0f0f10; border:1px solid rgba(239,68,68,0.25); padding:10px 12px; border-radius: 12px; width:100%; color:var(--ink); }
+    .btn { background: var(--brand); padding:10px 16px; border-radius: 12px; color:white; font-weight:700; box-shadow: 0 8px 20px rgba(239,68,68,0.3); transition: transform .08s ease; }
+    .btn:hover { background: var(--brand-600); transform: translateY(-1px); }
+    .btn.alt { background: #f43f5e; }
+    .muted { color: var(--muted); }
+    a { color:#fecaca; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .headline { text-shadow: 0 2px 10px rgba(239,68,68,0.35); }
+  </style>
+</head>
+<body>
+  <nav class="noprint border-b border-white/10 sticky top-0 z-10 bg-black/60 backdrop-blur">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+      <a href="{{ url_for('index') }}" class="flex items-center gap-3">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="FCAR Reparação Automotiva" class="h-9 w-9 rounded-lg ring-1 ring-red-500/40 shadow" />
+        <span class="font-semibold text-lg">FCAR Reparação Automotiva</span>
+      </a>
+      <a href="{{ url_for('clientes') }}" class="hover:text-white">Clientes</a>
+      <a href="{{ url_for('estoque') }}" class="hover:text-white">Estoque</a>
+      <a href="{{ url_for('mecanicos') }}" class="hover:text-white">Mecânicos</a>
+      <a href="{{ url_for('os_list') }}" class="hover:text-white">OS</a>
+      <a href="{{ url_for('agenda') }}" class="hover:text-white">Agenda</a>
+      <a href="{{ url_for('relatorio_mecanicos') }}" class="hover:text-white">Relatório Mecânicos</a>
+      {% if has_acesso %}
+      <a href="{{ url_for('acesso') }}" class="hover:text-white">Acesso (QR)</a>
+      {% endif %}
+      <span class="ml-auto text-sm muted">Ctrl+P imprime a OS</span>
+    </div>
+  </nav>
+  <main class="max-w-6xl mx-auto p-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="space-y-2 mb-3">
+          {% for cat, msg in messages %}
+            <div class="glass p-3 {{'border-green-500' if cat=='ok' else 'border-red-500'}}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block body %}{% endblock %}
+  </main>
+
+  <!-- QR Code fixo na base para abrir no celular -->
+  <footer class="noprint border-t border-white/10 mt-2">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+      <div class="text-sm muted">
+        Abra o sistema no celular: aponte a câmera para o QR Code.
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <div class="text-xs muted text-right leading-tight">
+          Acesso rápido<br/>na mesma rede.
+        </div>
+        <img src="{{ url_for('qr_generic') }}" alt="QR Code para acessar o sistema no celular" class="h-16 w-16 bg-white rounded-lg p-1 shadow" />
+      </div>
+    </div>
+  </footer>
+
+  <!-- Modal de confirmação (global) -->
+  <div id="confirmModal" class="fixed inset-0 z-50 hidden items-center justify-center noprint">
+    <div class="absolute inset-0 bg-black/70"></div>
+    <div class="relative glass p-5 w-[92%] max-w-md">
+      <h3 class="text-lg font-semibold mb-2">Confirmar exclusão</h3>
+      <p id="confirmText" class="mb-4 muted">Tem certeza?</p>
+      <div class="flex justify-end gap-2">
+        <button id="btnCancel" class="btn alt">Cancelar</button>
+        <button id="btnConfirm" class="btn danger">Excluir</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    const modal = document.getElementById('confirmModal');
+    const txt = document.getElementById('confirmText');
+    const btnCancel = document.getElementById('btnCancel');
+    const btnConfirm = document.getElementById('btnConfirm');
+    let pendingForm = null;
+    let pendingMsg = "Tem certeza?";
+
+    function openModal(message, form){
+      pendingForm = form;
+      pendingMsg = message || "Tem certeza?";
+      txt.textContent = pendingMsg;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+    function closeModal(){
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+    btnCancel.addEventListener('click', function(e){
+      e.preventDefault();
+      pendingForm = null;
+      closeModal();
+    });
+    btnConfirm.addEventListener('click', function(e){
+      e.preventDefault();
+      const form = pendingForm;
+      pendingForm = null;
+      closeModal();
+      if (form){
+        form.removeAttribute('data-intercept');
+        form.submit();
+      }
+    });
+
+    function attachInterceptors(){
+      document.querySelectorAll('form.js-delete-form').forEach(function(f){
+        if (f._boundConfirm) return;
+        f._boundConfirm = true;
+        f.addEventListener('submit', function(ev){
+          if (f.getAttribute('data-intercept') === 'no') return;
+          ev.preventDefault();
+          const rid = (f.getAttribute('data-osid') || '').trim();
+          const msg = f.getAttribute('data-msg') || (rid ? `Excluir OS #${rid}?` : 'Excluir OS?');
+          openModal(msg, f);
+        });
+      });
+    }
+    document.addEventListener('submit', function(ev){
+      const f = ev.target;
+      if (f && f.classList && f.classList.contains('js-delete-form')){
+        if (f.getAttribute('data-intercept') !== 'no'){
+        }
+      }
+    }, true);
+
+    attachInterceptors();
+    const obs = new MutationObserver(attachInterceptors);
+    obs.observe(document.body, {subtree:true, childList:true});
+  })();
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-2xl mx-auto p-3">
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <div class="muted text-xs">Mecânico:</div>
+      <div class="font-semibold">{{ mech['nome'] }}</div>
+    </div>
+    <a class="btn alt" href="{{ url_for('mecanico_logout') }}">Sair</a>
+  </div>
+
+  <div class="glass p-4 mb-4">
+    <div class="font-semibold mb-2">OS #{{ o['id'] }}</div>
+    <div class="text-sm">{{ o.get('cliente_nome') or '' }} — {{ o.get('veiculo') or '' }}</div>
+  </div>
+
+  <div class="grid gap-3">
+    <div class="glass p-4">
+      <div class="font-semibold mb-2">+ Peça</div>
+      <form method="post" action="{{ url_for('mecanico_add_atividade') }}" class="grid gap-2">
+        <input type="hidden" name="tipo" value="peca"/>
+        <input type="hidden" name="os_id" value="{{ o['id'] }}"/>
+        <input name="descricao" class="input" placeholder="Descrição da peça" required/>
+        <div class="grid grid-cols-2 gap-2">
+          <input name="quantidade" type="number" step="0.01" class="input" placeholder="Qtd" value="1"/>
+          <input name="valor_unitario" type="number" step="0.01" class="input" placeholder="Valor unitário (R$)"/>
+        </div>
+        <button class="btn">Lançar peça</button>
+      </form>
+    </div>
+
+    <div class="glass p-4">
+      <div class="font-semibold mb-2">+ Serviço</div>
+      <form method="post" action="{{ url_for('mecanico_add_atividade') }}" class="grid gap-2">
+        <input type="hidden" name="tipo" value="servico"/>
+        <input type="hidden" name="os_id" value="{{ o['id'] }}"/>
+        <input name="descricao" class="input" placeholder="Descrição do serviço" required/>
+        <div class="grid grid-cols-2 gap-2">
+          <input name="horas" type="number" step="0.1" class="input" placeholder="Horas" value="1"/>
+          <input name="valor_unitario" type="number" step="0.01" class="input" placeholder="Valor por hora (R$)"/>
+        </div>
+        <button class="btn">Lançar serviço</button>
+      </form>
+    </div>
+
+    <div class="glass p-4">
+      <div class="font-semibold mb-2">+ Observação</div>
+      <form method="post" action="{{ url_for('mecanico_add_atividade') }}" class="grid gap-2">
+        <input type="hidden" name="tipo" value="obs"/>
+        <input type="hidden" name="os_id" value="{{ o['id'] }}"/>
+        <textarea name="descricao" class="input" placeholder="Observação..." rows="2" required></textarea>
+        <button class="btn">Salvar observação</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="glass p-4 mt-4">
+    <div class="font-semibold mb-2">Atividades recentes</div>
+    <div class="space-y-2 max-h-72 overflow-auto">
+      {% for a in acts %}
+        <div class="flex justify-between items-center card p-2">
+          <div>
+            <div class="text-sm">{{ a['mecanico_nome'] }} • {{ a['tipo']|capitalize }} • #{{ a['id'] }}</div>
+            <div class="font-medium">{{ a['descricao'] }}</div>
+            <div class="text-xs muted">
+              {% if a['tipo']=='peca' %}
+                Qtd {{ a['quantidade'] }} × R${{ '%.2f'|format(a['valor_unitario'] or 0) }}
+              {% elif a['tipo']=='servico' %}
+                {{ a['horas'] }} h × R${{ '%.2f'|format(a['valor_unitario'] or 0) }}
+              {% endif %}
+              • {{ a['created_at'] }}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+      {% if not acts %}
+        <div class="muted text-sm">Sem lançamentos ainda.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

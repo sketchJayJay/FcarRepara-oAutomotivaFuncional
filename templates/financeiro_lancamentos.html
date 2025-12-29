@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-semibold">Lançamentos</h1>
+    <div class="flex gap-2">
+      <a href="{{ url_for('financeiro_dashboard') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Dashboard</a>
+      <a href="{{ url_for('financeiro_estoque') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Extrato Estoque</a>
+      <a href="{{ url_for('financeiro_novo') }}" class="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">+ Novo</a>
+    </div>
+  </div>
+
+  <form method="get" class="rounded-2xl bg-black/40 border border-zinc-800 p-4 mb-6 flex flex-wrap gap-3 items-end text-sm">
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Início</div>
+      <input type="date" name="start" value="{{ start }}" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Fim</div>
+      <input type="date" name="end" value="{{ end }}" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Tipo</div>
+      <select name="ttype" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+        <option value="">Todos</option>
+        <option value="IN" {% if ttype=='IN' %}selected{% endif %}>Entrada</option>
+        <option value="OUT" {% if ttype=='OUT' %}selected{% endif %}>Saída</option>
+      </select>
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Status</div>
+      <select name="status" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+        <option value="">Todos</option>
+        <option value="PENDENTE" {% if status=='PENDENTE' %}selected{% endif %}>Pendente</option>
+        <option value="EFETIVADO" {% if status=='EFETIVADO' %}selected{% endif %}>Efetivado</option>
+        <option value="CANCELADO" {% if status=='CANCELADO' %}selected{% endif %}>Cancelado</option>
+      </select>
+    </div>
+    <div class="flex-1 min-w-[220px]">
+      <div class="text-xs text-zinc-400 mb-1">Buscar</div>
+      <input type="text" name="q" value="{{ q }}" placeholder="Descrição..." class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <button class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-xs font-semibold">Filtrar</button>
+  </form>
+
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-zinc-400">
+            <th class="py-2">Data</th>
+            <th>Tipo</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Pagamento</th>
+            <th class="text-right">Valor</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="border-t border-zinc-800">
+            <td class="py-2">{{ r.date }}</td>
+            <td class="font-semibold">{% if r.ttype=='IN' %}Entrada{% else %}Saída{% endif %}</td>
+            <td class="text-zinc-200">{{ r.description }}</td>
+            <td class="text-zinc-400">{{ r.cat_name or '-' }}</td>
+            <td class="text-zinc-400">{{ r.pm_name or '-' }}</td>
+            <td class="text-right font-semibold">{{ r.amount|money }}</td>
+            <td class="text-xs">{{ r.status }}</td>
+            <td class="text-right">
+              <a href="{{ url_for('financeiro_ver', tx_id=r.id) }}" class="px-2 py-1 rounded-lg bg-black/30 border border-zinc-700 hover:bg-black/50 text-xs">Detalhes</a>
+              <a href="{{ url_for('financeiro_editar', tx_id=r.id) }}" class="px-2 py-1 rounded-lg bg-black/30 border border-zinc-700 hover:bg-black/50 text-xs">Editar</a>
+              <form method="post" action="{{ url_for('financeiro_cancelar', tx_id=r.id) }}" style="display:inline">
+                <button class="px-2 py-1 rounded-lg bg-zinc-700/40 border border-zinc-600 hover:bg-zinc-700/60 text-xs" onclick="return confirm('Cancelar lançamento?')">Cancelar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not rows %}
+          <tr><td colspan="8" class="py-3 text-zinc-400">Sem lançamentos no período.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

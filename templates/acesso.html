@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block body %}
+<h1 class="text-xl font-semibold mb-3 headline">Acesso para Mecânicos</h1>
+<div class="glass p-4 grid md:grid-cols-2 gap-4">
+  <div class="flex items-center justify-center">
+    <img src="{{ url_for('qr_generic', data=url) }}" alt="QR de acesso" class="bg-white p-3 rounded-xl" style="width:260px;height:260px;" />
+  </div>
+  <div>
+    <p class="mb-2">Escaneie o QR usando o celular (mesma rede Wi‑Fi) para abrir o sistema.</p>
+    <div class="glass p-3 mb-3">
+      <div class="text-sm muted">Endereço</div>
+      <div class="font-mono text-lg">{{ url }}</div>
+    </div>
+    <ul class="list-disc ml-5 text-sm space-y-1">
+      <li>Celular e computador precisam estar na <b>mesma rede</b>.</li>
+      <li>Se o celular não abrir, tente: <code class="font-mono">{{ url }}</code> manualmente.</li>
+      <li>Permita o acesso no firewall do Windows (porta <b>5055</b>).</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

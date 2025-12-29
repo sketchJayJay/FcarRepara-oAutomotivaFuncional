@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Extrato de Estoque</h1>
+      <div class="text-sm text-zinc-400 mt-1">Entradas e saídas de peças (baseado nas movimentações reais: Compras efetivadas e OS fechadas).</div>
+    </div>
+    <div class="flex gap-2">
+      <a href="{{ url_for('financeiro_dashboard') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Dashboard</a>
+      <a href="{{ url_for('financeiro_lancamentos') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Lançamentos</a>
+      <a href="{{ url_for('compras_list') }}" class="px-3 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Compras</a>
+    </div>
+  </div>
+
+  <form method="get" class="rounded-2xl bg-black/40 border border-zinc-800 p-4 mb-6 flex flex-wrap gap-3 items-end text-sm">
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Início</div>
+      <input type="date" name="start" value="{{ start }}" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Fim</div>
+      <input type="date" name="end" value="{{ end }}" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Direção</div>
+      <select name="dir" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+        <option value="">Todas</option>
+        <option value="IN" {% if direction=='IN' %}selected{% endif %}>Entrada</option>
+        <option value="OUT" {% if direction=='OUT' %}selected{% endif %}>Saída</option>
+      </select>
+    </div>
+    <div>
+      <div class="text-xs text-zinc-400 mb-1">Origem</div>
+      <select name="ref_type" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs">
+        <option value="">Todas</option>
+        <option value="OS" {% if ref_type=='OS' %}selected{% endif %}>OS</option>
+        <option value="PURCHASE" {% if ref_type=='PURCHASE' %}selected{% endif %}>Compra</option>
+        <option value="ADHOC" {% if ref_type=='ADHOC' %}selected{% endif %}>Avulso</option>
+      </select>
+    </div>
+    <div class="min-w-[220px]">
+      <div class="text-xs text-zinc-400 mb-1">Peça (opcional)</div>
+      <select name="item_id" class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs w-full">
+        <option value="">Todas</option>
+        {% for inv in inventory_options %}
+          <option value="{{ inv.id }}" {% if item_id|int == inv.id %}selected{% endif %}>{{ inv.name }}{% if inv.sku %} ({{ inv.sku }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-1 min-w-[220px]">
+      <div class="text-xs text-zinc-400 mb-1">Busca</div>
+      <input type="text" name="q" value="{{ q }}" placeholder="nome da peça..." class="rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs w-full">
+    </div>
+    <div class="flex gap-2">
+      <button class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">Filtrar</button>
+      <a href="{{ url_for('financeiro_estoque') }}" class="px-4 py-2 rounded-xl bg-black/40 border border-zinc-800 text-sm hover:bg-black/55">Limpar</a>
+    </div>
+  </form>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Entradas (qtd)</div>
+      <div class="text-2xl font-semibold mt-1">{{ '%.2f'|format(qty_in) }}</div>
+      <div class="text-xs text-zinc-500 mt-1">Valor (se houver): R$ {{ '%.2f'|format(val_in) }}</div>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Saídas (qtd)</div>
+      <div class="text-2xl font-semibold mt-1">{{ '%.2f'|format(qty_out) }}</div>
+      <div class="text-xs text-zinc-500 mt-1">Valor (se houver): R$ {{ '%.2f'|format(val_out) }}</div>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Saldo (qtd)</div>
+      <div class="text-2xl font-semibold mt-1">{{ '%.2f'|format(qty_in - qty_out) }}</div>
+      <div class="text-xs text-zinc-500 mt-1">Período selecionado</div>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+      <div class="text-xs text-zinc-400">Movimentos</div>
+      <div class="text-2xl font-semibold mt-1">{{ rows|length }}</div>
+      <div class="text-xs text-zinc-500 mt-1">Linhas no extrato</div>
+    </div>
+  </div>
+
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 overflow-hidden mb-8">
+    <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+      <div class="font-semibold">Movimentações (detalhado)</div>
+      <div class="text-xs text-zinc-500">Dica: “Saída” costuma ser OS fechada. “Entrada” costuma ser Compra efetivada.</div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-black/30">
+          <tr class="text-left text-zinc-400">
+            <th class="px-4 py-3">Data</th>
+            <th class="px-4 py-3">Direção</th>
+            <th class="px-4 py-3">Peça</th>
+            <th class="px-4 py-3">Qtd</th>
+            <th class="px-4 py-3">Custo/Valor</th>
+            <th class="px-4 py-3">Total</th>
+            <th class="px-4 py-3">Origem</th>
+            <th class="px-4 py-3">Lançamento</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-900/60">
+          {% for r in rows %}
+          <tr class="hover:bg-white/5">
+            <td class="px-4 py-3 text-zinc-200">{{ r.date }}</td>
+            <td class="px-4 py-3">
+              {% if r.direction == 'IN' %}
+                <span class="px-2 py-1 rounded-lg text-xs bg-emerald-500/15 border border-emerald-500/25 text-emerald-200">ENTRADA</span>
+              {% else %}
+                <span class="px-2 py-1 rounded-lg text-xs bg-red-500/15 border border-red-500/25 text-red-200">SAÍDA</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              <div class="font-medium">{{ r.inv_name or r.item_desc }}</div>
+              {% if r.inv_sku %}<div class="text-xs text-zinc-500">SKU: {{ r.inv_sku }}</div>{% endif %}
+            </td>
+            <td class="px-4 py-3">{{ '%.2f'|format(r.qty or 0) }}</td>
+            <td class="px-4 py-3">R$ {{ '%.2f'|format(r.unit_value or 0) }}</td>
+            <td class="px-4 py-3">R$ {{ '%.2f'|format(r.total or 0) }}</td>
+            <td class="px-4 py-3">
+              {% if r.ref_type == 'OS' %}
+                <a class="text-red-200 hover:underline" href="{{ url_for('os_view', os_id=r.ref_id) }}">OS #{{ r.ref_id }}</a>
+              {% elif r.ref_type == 'PURCHASE' %}
+                <a class="text-red-200 hover:underline" href="{{ url_for('compras_editar', purchase_id=r.ref_id) }}">Compra #{{ r.ref_id }}</a>
+              {% else %}
+                <span class="text-zinc-300">{{ r.ref_type or '-' }}{% if r.ref_id %} #{{ r.ref_id }}{% endif %}</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              <a class="text-zinc-200 hover:underline" href="{{ url_for('financeiro_ver', tx_id=r.tx_id) }}">#{{ r.tx_id }}</a>
+              <div class="text-xs text-zinc-500">{{ r.tx_desc }}</div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if rows|length == 0 %}
+          <tr>
+            <td class="px-4 py-6 text-center text-zinc-500" colspan="8">Nenhuma movimentação encontrada no período/filtro.</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 overflow-hidden">
+      <div class="p-4 border-b border-zinc-800 font-semibold">Resumo por peça</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-black/30">
+            <tr class="text-left text-zinc-400">
+              <th class="px-4 py-3">Peça</th>
+              <th class="px-4 py-3">Entrou</th>
+              <th class="px-4 py-3">Saiu</th>
+              <th class="px-4 py-3">Saldo</th>
+              <th class="px-4 py-3">Estoque atual</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-900/60">
+            {% for it in by_item_rows %}
+            <tr class="hover:bg-white/5">
+              <td class="px-4 py-3">
+                <div class="font-medium">{{ it.name }}</div>
+                {% if it.sku %}<div class="text-xs text-zinc-500">SKU: {{ it.sku }}</div>{% endif %}
+              </td>
+              <td class="px-4 py-3">{{ '%.2f'|format(it.in_qty) }}</td>
+              <td class="px-4 py-3">{{ '%.2f'|format(it.out_qty) }}</td>
+              <td class="px-4 py-3">{{ '%.2f'|format(it.in_qty - it.out_qty) }}</td>
+              <td class="px-4 py-3">{{ '%.2f'|format(it.current_stock) }}</td>
+            </tr>
+            {% endfor %}
+            {% if by_item_rows|length == 0 %}
+            <tr><td class="px-4 py-6 text-center text-zinc-500" colspan="5">Sem dados para agrupar.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 overflow-hidden">
+      <div class="p-4 border-b border-zinc-800 font-semibold">Resumo por OS / Compra</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-black/30">
+            <tr class="text-left text-zinc-400">
+              <th class="px-4 py-3">Data</th>
+              <th class="px-4 py-3">Origem</th>
+              <th class="px-4 py-3">Entrou</th>
+              <th class="px-4 py-3">Saiu</th>
+              <th class="px-4 py-3">Peças</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-900/60">
+            {% for rr in by_ref_rows %}
+            <tr class="hover:bg-white/5">
+              <td class="px-4 py-3 text-zinc-200">{{ rr.date }}</td>
+              <td class="px-4 py-3">
+                {% if rr.ref_type == 'OS' %}
+                  <a class="text-red-200 hover:underline" href="{{ url_for('os_view', os_id=rr.ref_id) }}">OS #{{ rr.ref_id }}</a>
+                {% elif rr.ref_type == 'PURCHASE' %}
+                  <a class="text-red-200 hover:underline" href="{{ url_for('compras_editar', purchase_id=rr.ref_id) }}">Compra #{{ rr.ref_id }}</a>
+                {% else %}
+                  <span class="text-zinc-300">{{ rr.ref_type }}{% if rr.ref_id %} #{{ rr.ref_id }}{% endif %}</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3">{{ '%.2f'|format(rr.in_qty) }}</td>
+              <td class="px-4 py-3">{{ '%.2f'|format(rr.out_qty) }}</td>
+              <td class="px-4 py-3">
+                <div class="text-xs text-zinc-300">{{ rr.items_preview }}</div>
+                <div class="text-[11px] text-zinc-500">{{ rr.items_count }} item(ns)</div>
+              </td>
+            </tr>
+            {% endfor %}
+            {% if by_ref_rows|length == 0 %}
+            <tr><td class="px-4 py-6 text-center text-zinc-500" colspan="5">Sem dados para agrupar.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

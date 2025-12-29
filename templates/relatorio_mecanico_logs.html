@@ -1,0 +1,31 @@
+
+{% extends "base.html" %}
+{% block body %}
+<h1 class="text-xl font-semibold mb-4">Relatório — Lançamentos de Serviços</h1>
+<form class="glass p-4 mb-4 grid md:grid-cols-5 gap-3">
+  <div>
+    <label class="label">Início</label>
+    <input type="date" name="start" class="field" value="{{ start.strftime('%Y-%m-%d') }}">
+  </div>
+  <div>
+    <label class="label">Fim</label>
+    <input type="date" name="end" class="field" value="{{ end.strftime('%Y-%m-%d') }}">
+  </div>
+  <div class="md:col-span-3 flex items-end">
+    <button class="btn">Filtrar</button>
+  </div>
+</form>
+<div class="space-y-2">
+  {% for r in rows %}
+    <div class="glass p-3">
+      <div class="flex items-center justify-between">
+        <div class="font-medium">{{ r['work_date'] }} — {{ r['mech_name'] }}{% if r['os_id'] %} • OS #{{ r['os_id'] }}{% endif %}</div>
+        <div class="text-sm">Horas: <span class="font-semibold">{{ r['hours'] or 0 }}</span></div>
+      </div>
+      <div class="text-sm muted mt-1">{{ r['description'] }}</div>
+    </div>
+  {% else %}
+    <div class="muted">Sem registros no período.</div>
+  {% endfor %}
+</div>
+{% endblock %}

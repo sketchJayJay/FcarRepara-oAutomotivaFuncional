@@ -1,0 +1,504 @@
+{% extends "base.html" %} 
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <h1 class="text-2xl font-semibold mb-6">Nova OS</h1>
+
+  <form method="post">
+    <!-- Cliente / Veículo / Mecânico -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div>
+        <label class="block text-sm mb-1">Cliente</label>
+        <input type="hidden" name="client_id" id="client_id">
+        <input id="client-search"
+               type="text"
+               class="w-full rounded-xl bg-black/40 border border-red-500/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+               placeholder="Digite nome, telefone ou CPF..."
+               autocomplete="off">
+        <div id="client-results"
+             class="mt-1 bg-zinc-900 border border-zinc-700 rounded-xl max-h-56 overflow-y-auto hidden text-sm"></div>
+        <p id="client-selected-info" class="mt-1 text-xs text-gray-400">
+          Nenhum cliente selecionado.
+        </p>
+      </div>
+
+      <div>
+        <label class="block text-sm mb-1">Marca do veículo</label>
+        <select id="vehicle_brand"
+                class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+          <option value="">-- selecione a marca --</option>
+          <option value="Chevrolet">Chevrolet</option>
+          <option value="Fiat">Fiat</option>
+          <option value="Volkswagen">Volkswagen</option>
+          <option value="Ford">Ford</option>
+          <option value="Toyota">Toyota</option>
+          <option value="Hyundai">Hyundai</option>
+          <option value="Honda">Honda</option>
+          <option value="Renault">Renault</option>
+          <option value="Peugeot">Peugeot</option>
+          <option value="Citroën">Citroën</option>
+          <option value="Nissan">Nissan</option>
+          <option value="Jeep">Jeep</option>
+        </select>
+        <input id="vehicle_brand_other"
+               type="text"
+               placeholder="Outra marca (opcional)"
+               class="mt-2 w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs"
+        >
+      </div>
+
+      <div>
+        <label class="block text-sm mb-1">Modelo</label>
+        <select id="vehicle_model"
+                class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm"
+                disabled>
+          <option value="">-- selecione a marca primeiro --</option>
+        </select>
+        <input id="vehicle_model_other"
+               type="text"
+               placeholder="Outro modelo (opcional)"
+               class="mt-2 w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-xs"
+        >
+        <label class="block text-sm mt-3 mb-1">Placa</label>
+        <input name="vehicle_plate"
+               type="text"
+               maxlength="10"
+               placeholder="Ex: ABC1D23"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm uppercase">
+        <!-- hidden pra mandar texto pro backend (marca + modelo) -->
+        <input type="hidden" name="vehicle_text" id="vehicle_text">
+        <!-- mantém veículo_id pra compatibilidade, mas em branco -->
+        <input type="hidden" name="vehicle_id" value="">
+      </div>
+
+      <div>
+        <label class="block text-sm mb-1">Mecânico</label>
+        <select name="mechanic_id"
+                class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+          <option value="">-- selecione --</option>
+          {% for m in mechs %}
+          <option value="{{ m.id }}">{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- Observações / Mão de obra -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div class="md:col-span-3">
+        <label class="block text-sm mb-1">Observações</label>
+        <textarea name="notes" rows="3"
+                  class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm"></textarea>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Mão de obra (R$)</label>
+        <input type="number" step="0.01" name="labor" value="0"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+      </div>
+    </div>
+
+    <!-- Itens / Peças -->
+    <div class="border border-zinc-800 rounded-2xl p-4 bg-black/30 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-medium">Itens / Peças</h2>
+        <button type="button" id="add-item"
+                class="px-3 py-1 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-medium">
+          + Adicionar item
+        </button>
+      </div>
+
+      <div class="text-xs text-gray-400 mb-2">
+        Dica: use a busca do estoque para preencher descrição e preço automaticamente.
+      </div>
+
+      <div id="items-container" class="space-y-3">
+      </div>
+
+<!-- Resumo automático -->
+<div class="border border-zinc-800 rounded-2xl p-4 bg-black/30 mb-6">
+  <h2 class="text-lg font-medium mb-2">Resumo automático</h2>
+
+  <div class="grid grid-cols-1 md:grid-cols-5 gap-3 text-sm">
+    <div><span class="text-gray-400">Peças (saída):</span> <b id="resPecasNew">R$ 0,00</b></div>
+    <div><span class="text-gray-400">Mão de obra:</span> <b id="resMoNew">R$ 0,00</b></div>
+    <div><span class="text-gray-400">Serviços extras:</span> <b id="resServExtraNew">R$ 0,00</b></div>
+    <div><span class="text-gray-400">Total serviços (entrada):</span> <b id="resServTotalNew">R$ 0,00</b></div>
+    <div><span class="text-gray-400">Total geral (entrada):</span> <b id="resTotalNew">R$ 0,00</b></div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 text-xs">
+    <div>
+      <div class="text-gray-400 mb-1">Peças usadas (saída)</div>
+      <ul id="listaPecasNew" class="list-disc pl-5 space-y-1 text-gray-200"></ul>
+    </div>
+    <div>
+      <div class="text-gray-400 mb-1">Serviços (entrada)</div>
+      <ul id="listaServicosNew" class="list-disc pl-5 space-y-1 text-gray-200"></ul>
+    </div>
+  </div>
+
+  <div class="text-[11px] text-gray-400 mt-3">
+    Dica: use “+ Adicionar mão de obra” para serviços extras (além do campo Mão de obra).
+  </div>
+</div>    </div>
+
+    <button type="submit"
+            class="px-6 py-2 rounded-xl bg-red-500 hover:bg-red-600 font-semibold text-sm">
+      Salvar OS
+    </button>
+  </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+      // ---------- Marca / Modelo de veículo ----------
+      const brandSelect = document.getElementById('vehicle_brand');
+      const modelSelect = document.getElementById('vehicle_model');
+      const vehicleText = document.getElementById('vehicle_text');
+      const brandOther  = document.getElementById('vehicle_brand_other');
+      const modelOther  = document.getElementById('vehicle_model_other');
+
+      const vehicleData = {
+        'Chevrolet': ['Onix', 'Celta', 'Corsa', 'Prisma', 'S10', 'Spin', 'Montana'],
+        'Fiat': ['Uno', 'Palio', 'Siena', 'Argo', 'Mobi', 'Strada', 'Toro'],
+        'Volkswagen': ['Gol', 'Fox', 'Voyage', 'Polo', 'Virtus', 'Saveiro'],
+        'Ford': ['Ka', 'Fiesta', 'Focus', 'EcoSport', 'Ranger'],
+        'Toyota': ['Corolla', 'Etios', 'Hilux', 'Yaris'],
+        'Hyundai': ['HB20', 'Creta', 'i30', 'Tucson'],
+        'Honda': ['Civic', 'Fit', 'City', 'HR-V'],
+        'Renault': ['Sandero', 'Logan', 'Duster', 'Kwid'],
+        'Peugeot': ['206', '207', '208', '307', '308', '208 GT'],
+        'Citroën': ['C3', 'C4', 'Aircross'],
+        'Nissan': ['March', 'Versa', 'Kicks', 'Frontier'],
+        'Jeep': ['Renegade', 'Compass', 'Wrangler']
+      };
+
+      function updateVehicleText() {
+        const bSel = brandSelect ? brandSelect.value : '';
+        const mSel = modelSelect ? modelSelect.value : '';
+        const bOther = brandOther ? brandOther.value.trim() : '';
+        const mOther = modelOther ? modelOther.value.trim() : '';
+
+        const b = bOther || bSel;
+        const m = mOther || mSel;
+
+        if (!vehicleText) return;
+
+        if (b && m) {
+          vehicleText.value = b + ' ' + m;
+        } else if (b) {
+          vehicleText.value = b;
+        } else {
+          vehicleText.value = '';
+        }
+      }
+
+      brandSelect && brandSelect.addEventListener('change', function () {
+        const brand = brandSelect.value;
+        modelSelect.innerHTML = '';
+        if (!brand || !vehicleData[brand]) {
+          modelSelect.disabled = true;
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '-- selecione a marca primeiro --';
+          modelSelect.appendChild(opt);
+          updateVehicleText();
+          return;
+        }
+        modelSelect.disabled = false;
+        const opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = '-- selecione o modelo --';
+        modelSelect.appendChild(opt0);
+        vehicleData[brand].forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m;
+          modelSelect.appendChild(opt);
+        });
+        updateVehicleText();
+      });
+
+      modelSelect && modelSelect.addEventListener('change', updateVehicleText);
+      brandOther && brandOther.addEventListener('input', updateVehicleText);
+      modelOther && modelOther.addEventListener('input', updateVehicleText);
+
+
+
+  // ---------- Busca de cliente ----------
+  const input      = document.getElementById('client-search');
+  const hiddenId   = document.getElementById('client_id');
+  const resultsBox = document.getElementById('client-results');
+  const info       = document.getElementById('client-selected-info');
+  let timeout = null;
+
+  function clearResults() {
+    resultsBox.innerHTML = '';
+    resultsBox.classList.add('hidden');
+  }
+
+  function selectClient(c) {
+    hiddenId.value = c.id;
+    input.value    = c.label || c.name;
+    info.textContent = 'Cliente selecionado: ' + c.name;
+    clearResults();
+  }
+
+  input.addEventListener('input', function () {
+    const q = input.value.trim();
+    hiddenId.value = '';
+    info.textContent = 'Nenhum cliente selecionado.';
+
+    if (timeout) clearTimeout(timeout);
+
+    if (q.length < 3) {
+      clearResults();
+      return;
+    }
+
+    timeout = setTimeout(() => {
+      fetch(`/api/clients_search?q=${encodeURIComponent(q)}&limit=20`)
+        .then(r => r.json())
+        .then(data => {
+          resultsBox.innerHTML = '';
+          if (!data.length) {
+            clearResults();
+            return;
+          }
+          data.forEach(c => {
+            const div = document.createElement('div');
+            div.className = 'px-3 py-2 text-sm text-gray-100 hover:bg-red-500/80 hover:text-white cursor-pointer';
+            div.textContent = c.label || c.name;
+            div.addEventListener('click', () => selectClient(c));
+            resultsBox.appendChild(div);
+          });
+          resultsBox.classList.remove('hidden');
+        })
+        .catch(err => console.error(err));
+    }, 300);
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!resultsBox.contains(e.target) && e.target !== input) {
+      clearResults();
+    }
+  });
+
+  // ---------- Itens / estoque / mão de obra ----------
+  const itemsContainer = document.getElementById('items-container');
+  const addItemBtn = document.getElementById('add-item');
+  let addLaborBtn = null; // will be wired after we inject it
+
+  let itemIndex = 0;
+
+  function addRow(isLabor) {
+    itemIndex += 1;
+    const idx = itemIndex;
+    const row = document.createElement('div');
+    row.className = 'grid grid-cols-12 gap-2 items-center';
+
+    row.innerHTML = `
+      <div class="col-span-4">
+        <input type="hidden" name="item_inv_${idx}" id="item_inv_${idx}">
+        <input type="text" id="item_search_${idx}" placeholder="Buscar no estoque..."
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-xs" autocomplete="off">
+        <div id="item_results_${idx}"
+             class="mt-1 bg-zinc-900 border border-zinc-700 rounded-xl max-h-40 overflow-y-auto hidden text-xs"></div>
+      </div>
+      <div class="col-span-4">
+        <input type="text" name="item_desc_${idx}" id="item_desc_${idx}" placeholder="Descrição do ${isLabor ? 'serviço (M.O.)' : 'item'}"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-xs">
+      </div>
+      <div class="col-span-2">
+        <input type="number" step="0.01" name="item_price_${idx}" id="item_price_${idx}" value="0"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-xs">
+      </div>
+      <div class="col-span-1">
+        <input type="number" step="0.01" name="item_qty_${idx}" id="item_qty_${idx}" value="1"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-2 py-1 text-xs">
+      </div>
+      <div class="col-span-1 flex flex-col gap-1">
+        ${isLabor ? `
+        <input type="hidden" name="item_is_labor_${idx}" value="1">
+        <span class="text-[10px] text-amber-300 font-semibold text-center">M.O.</span>
+        ` : ``}
+        <button type="button"
+                class="px-2 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-xs"
+                onclick="this.closest('div.grid').remove()">
+          X
+        </button>
+      </div>
+    `;
+
+    itemsContainer.appendChild(row);
+
+    const searchInput = row.querySelector(`#item_search_${idx}`);
+    const resultsDiv  = row.querySelector(`#item_results_${idx}`);
+    const descInput   = row.querySelector(`#item_desc_${idx}`);
+    const priceInput  = row.querySelector(`#item_price_${idx}`);
+    const invHidden   = row.querySelector(`#item_inv_${idx}`);
+
+    let t = null;
+
+    function clearItemResults() {
+      resultsDiv.innerHTML = '';
+      resultsDiv.classList.add('hidden');
+    }
+
+    searchInput.addEventListener('input', function () {
+      const q = searchInput.value.trim();
+      invHidden.value = '';
+      if (t) clearTimeout(t);
+      if (q.length < 2) {
+        clearItemResults();
+        return;
+      }
+      t = setTimeout(() => {
+        fetch(`/api/inventory_search?q=${encodeURIComponent(q)}&limit=20`)
+          .then(r => r.json())
+          .then(data => {
+            resultsDiv.innerHTML = '';
+            if (!data.length) {
+              clearItemResults();
+              return;
+            }
+            data.forEach(it => {
+              const d = document.createElement('div');
+              d.className = 'px-2 py-1 hover:bg-red-500/80 hover:text-white cursor-pointer';
+              d.textContent = `${it.name} (R$ ${it.price.toFixed(2).replace('.',',')})`;
+              d.addEventListener('click', () => {
+                invHidden.value = it.id;
+                descInput.value = it.name;
+                priceInput.value = it.price.toFixed(2);
+                searchInput.value = it.name;
+                clearItemResults();
+              });
+              resultsDiv.appendChild(d);
+            });
+            resultsDiv.classList.remove('hidden');
+          })
+          .catch(err => console.error(err));
+      }, 250);
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!resultsDiv.contains(e.target) && e.target !== searchInput) {
+        clearItemResults();
+      }
+    });
+  }
+
+  // Ajusta o header para ter dois botões: item e mão de obra
+  const headerDiv = addItemBtn && addItemBtn.parentElement;
+  if (headerDiv) {
+    headerDiv.innerHTML = `
+      <h2 class="text-lg font-medium">Itens / Peças e Mão de obra</h2>
+      <div class="space-x-2">
+        <button type="button" id="add-labor"
+                class="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-600 text-sm font-medium">
+          + Adicionar mão de obra
+        </button>
+        <button type="button" id="add-item"
+                class="px-3 py-1 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-medium">
+          + Adicionar item
+        </button>
+      </div>
+    `;
+  }
+
+  const addItemBtnFinal = document.getElementById('add-item');
+  addLaborBtn = document.getElementById('add-labor');
+
+  addItemBtnFinal && addItemBtnFinal.addEventListener('click', function () {
+    addRow(false);
+  });
+  addLaborBtn && addLaborBtn.addEventListener('click', function () {
+    addRow(true);
+  });
+
+
+// ---------- Resumo automático (peças/serviços) ----------
+function _parseNum(v){
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  v = String(v).replace(',', '.');
+  const n = parseFloat(v);
+  return isFinite(n) ? n : 0;
+}
+function _brl(n){
+  try { return (n || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
+  catch(e){ return 'R$ ' + (Number(n||0).toFixed(2)).replace('.', ','); }
+}
+
+function atualizarResumoNew(){
+  const labor = _parseNum(document.querySelector('input[name="labor"]')?.value);
+
+  let pecasTotal = 0;
+  let servExtraTotal = 0;
+  const pecas = [];
+  const servs = [];
+
+  document.querySelectorAll('input[name^="item_desc_"]').forEach((descEl) => {
+    const m = (descEl.name || '').match(/item_desc_(\d+)/);
+    if (!m) return;
+    const idx = m[1];
+    const desc = (descEl.value || '').trim();
+    if (!desc) return;
+
+    const qty = _parseNum(document.querySelector(`input[name="item_qty_${idx}"]`)?.value || 1) || 1;
+    const price = _parseNum(document.querySelector(`input[name="item_price_${idx}"]`)?.value || 0);
+    const total = qty * price;
+
+    const isLabor = !!document.querySelector(`input[name="item_is_labor_${idx}"]`);
+    if (isLabor){
+      servExtraTotal += total;
+      servs.push(`${desc} (${qty} x ${_brl(price)} = ${_brl(total)})`);
+    } else {
+      pecasTotal += total;
+      pecas.push(`${desc} (${qty} x ${_brl(price)} = ${_brl(total)})`);
+    }
+  });
+
+  const servTotal = labor + servExtraTotal;
+  const totalGeral = pecasTotal + servTotal;
+
+  document.getElementById('resPecasNew').textContent = _brl(pecasTotal);
+  document.getElementById('resMoNew').textContent = _brl(labor);
+  document.getElementById('resServExtraNew').textContent = _brl(servExtraTotal);
+  document.getElementById('resServTotalNew').textContent = _brl(servTotal);
+  document.getElementById('resTotalNew').textContent = _brl(totalGeral);
+
+  const ulP = document.getElementById('listaPecasNew');
+  const ulS = document.getElementById('listaServicosNew');
+  if (ulP){
+    ulP.innerHTML = (pecas.length ? pecas : ['(nenhuma peça)']).map(t => `<li>${t}</li>`).join('');
+  }
+  if (ulS){
+    const base = labor > 0 ? [`Mão de obra (${_brl(labor)})`] : [];
+    const all = base.concat(servs);
+    ulS.innerHTML = (all.length ? all : ['(nenhum serviço)']).map(t => `<li>${t}</li>`).join('');
+  }
+}
+
+// Atualiza quando mexer nos campos
+document.addEventListener('input', (ev) => {
+  const n = ev.target?.name || '';
+  if (n === 'labor' || n.startsWith('item_')) atualizarResumoNew();
+});
+document.addEventListener('change', (ev) => {
+  const n = ev.target?.name || '';
+  if (n === 'labor' || n.startsWith('item_')) atualizarResumoNew();
+});
+
+// Atualiza quando adicionar/remover linhas (MutationObserver)
+if (itemsContainer){
+  const obs = new MutationObserver(() => atualizarResumoNew());
+  obs.observe(itemsContainer, { childList: true, subtree: true });
+}
+
+  // cria uma linha inicial de item (peça)
+  addRow(false);
+  try { atualizarResumoNew(); } catch(e) {}
+});
+</script>
+{% endblock %}

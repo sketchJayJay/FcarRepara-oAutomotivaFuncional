@@ -1,0 +1,17 @@
+FCAR - Abrir sem CMD (Windows)
+
+✅ Como usar
+1) Copie estes arquivos para dentro da pasta do seu FCAR (a mesma onde fica app.py ou start.py):
+   - ABRIR_FCAR.vbs
+   - start_fcar.py
+   - FECHAR_FCAR.bat
+   - ABRIR_FCAR_DEBUG.bat
+
+2) Para abrir sem CMD: dê 2 cliques em ABRIR_FCAR.vbs
+   - Ele inicia o servidor em segundo plano e abre o navegador.
+
+3) Para fechar: dê 2 cliques em FECHAR_FCAR.bat
+
+🛠️ Se der algum problema
+- Rode ABRIR_FCAR_DEBUG.bat para ver erros.
+- Veja o arquivo fcar_start.log na pasta do FCAR.

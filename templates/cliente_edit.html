@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<h1 class="text-xl font-semibold mb-3 headline">Editar Cliente</h1>
+<form method="post" class="grid md:grid-cols-2 gap-3 glass p-4">
+  <input class="field" name="name" value="{{ c['name'] }}">
+  <input class="field" name="phone" value="{{ c['phone'] or '' }}" placeholder="Telefone">
+  <input class="field" name="cpf" value="{{ c['cpf'] or '' }}" placeholder="CPF">
+  <input class="field" name="address" value="{{ c['address'] or '' }}" placeholder="Endereço">
+  <div class="md:col-span-2">
+    <button class="btn">Salvar alterações</button>
+    <a class="btn alt" href="{{ url_for('clientes') }}">Voltar</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-md mx-auto glass p-5">
+  <h1 class="text-xl font-semibold mb-4 headline">Acesso do Mecânico</h1>
+  <form method="post" class="space-y-3">
+    <div>
+      <label class="block text-sm mb-1">PIN</label>
+      <input type="password" name="pin" class="input" placeholder="****" required />
+    </div>
+    <input type="hidden" name="next_os" value="{{ request.args.get('next_os','') }}"/>
+    <button class="btn w-full">Entrar</button>
+  </form>
+  <p class="text-xs muted mt-3">PINs iniciais: 1111 (Ana), 2222 (Bruno), 3333 (Carlos). Você pode editar na tabela <code>mecanicos</code>.</p>
+</div>
+{% endblock %}

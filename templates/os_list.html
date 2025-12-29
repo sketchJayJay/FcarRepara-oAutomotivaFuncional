@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-semibold">Ordens de Serviço</h1>
+    <a href="{{ url_for('os_new') }}"
+       class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">
+      + Nova OS
+    </a>
+  </div>
+
+  <form method="get" class="mb-5">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+      <div>
+        <label class="block text-xs mb-1">Status</label>
+        <select name="status"
+                class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+          <option value="">Todos</option>
+          <option value="Aberta"  {% if status == 'Aberta' %}selected{% endif %}>Aberta</option>
+          <option value="Fechada" {% if status == 'Fechada' %}selected{% endif %}>Fechada</option>
+          <option value="Cancelada" {% if status == 'Cancelada' %}selected{% endif %}>Cancelada</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs mb-1">Mecânico</label>
+        <select name="mechanic_id"
+                class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+          <option value="">Todos</option>
+          {% for m in mechs %}
+          <option value="{{ m.id }}" {% if mech_id and mech_id|int == m.id %}selected{% endif %}>
+            {{ m.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs mb-1">Início</label>
+        <input type="date" name="start" value="{{ start or '' }}"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+      </div>
+
+      <div>
+        <label class="block text-xs mb-1">Fim</label>
+        <input type="date" name="end" value="{{ end or '' }}"
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+      </div>
+
+      <div>
+        <label class="block text-xs mb-1">Buscar (nome ou placa)</label>
+        <input type="text" name="q" value="{{ q or '' }}"
+               placeholder="Ex: João, ABC1234..."
+               class="w-full rounded-xl bg-black/40 border border-zinc-700 px-3 py-2 text-sm">
+      </div>
+    </div>
+
+    <div class="mt-4 flex gap-3">
+      <button type="submit"
+              class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">
+        Filtrar
+      </button>
+      <a href="{{ url_for('os_list') }}"
+         class="px-4 py-2 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-sm font-semibold">
+        Limpar
+      </a>
+    </div>
+  </form>
+
+  <div class="overflow-x-auto rounded-2xl border border-zinc-800 bg-black/40">
+    <table class="min-w-full text-sm">
+      <thead class="bg-black/60 border-b border-zinc-800 text-xs uppercase text-gray-400">
+        <tr>
+          <th class="px-4 py-3 text-left">ID</th>
+          <th class="px-4 py-3 text-left">Data</th>
+          <th class="px-4 py-3 text-left">Cliente</th>
+          <th class="px-4 py-3 text-left">Veículo</th>
+          <th class="px-4 py-3 text-left">Mecânico</th>
+          <th class="px-4 py-3 text-left">Status</th>
+          <th class="px-4 py-3 text-right">Total peças</th>
+          <th class="px-4 py-3 text-right">Total OS</th>
+          <th class="px-4 py-3 text-center">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="border-b border-zinc-800/70 hover:bg-zinc-900/60">
+          <td class="px-4 py-3 text-xs text-gray-400">#{{ r.id }}</td>
+          <td class="px-4 py-3 text-xs">
+            {{ r.created_at[:10] if r.created_at }}
+          </td>
+          <td class="px-4 py-3">
+            {{ r.client_name }}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            {{ r.plate or '-' }}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            {{ r.mech or '-' }}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-[11px] bg-amber-900/40 border border-amber-500/40">
+              {{ r.status }}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-right text-xs">
+            R$ {{ '%.2f'|format(r.total_itens or 0) }}
+          </td>
+          <td class="px-4 py-3 text-right text-xs">
+            R$ {{ '%.2f'|format(r.total_geral or 0) }}
+          </td>
+          <td class="px-4 py-3 text-center text-xs">
+            <div class="inline-flex gap-2">
+              <a href="{{ url_for('os_view', os_id=r.id, print=1) }}"
+                 class="px-3 py-1 rounded-full bg-red-500 hover:bg-red-600 text-[11px] font-semibold">
+                Imprimir
+              </a>
+              <a href="{{ url_for('os_edit', os_id=r.id) }}"
+                 class="px-3 py-1 rounded-full bg-zinc-700 hover:bg-zinc-600 text-[11px] font-semibold">
+                Editar
+              </a>
+              <form method="post"
+                    action="{{ url_for('os_delete', os_id=r.id) }}"
+                    class="inline-block"
+                    onsubmit="return confirm('Deseja realmente excluir esta OS?');">
+                <input type="hidden" name="next" value="{{ request.full_path }}">
+                <button type="submit"
+                        class="px-3 py-1 rounded-full bg-zinc-800 hover:bg-zinc-900 text-[11px] font-semibold">
+                  Excluir
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="9" class="px-4 py-6 text-center text-sm text-gray-400">
+            Nenhuma OS encontrada com os filtros informados.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

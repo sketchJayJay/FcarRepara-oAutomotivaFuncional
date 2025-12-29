@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-md mx-auto p-4">
+  <h1 class="text-xl font-semibold headline mb-3">OS #{{ o['id'] }}</h1>
+  <div class="glass p-4 mb-4">
+    <div class="font-medium">{{ o.get('cliente_nome') or 'Cliente' }}</div>
+    <div class="muted text-sm">{{ o.get('veiculo') or '' }} • {{ o.get('placa') or '' }}</div>
+  </div>
+
+  <div class="grid gap-3">
+    <a class="btn w-full" href="{{ url_for('os_view', os_id=o['id']) }}">Visualizar OS (leitura/cliente)</a>
+    <a class="btn alt w-full" href="{{ url_for('mecanico_os', os_id=o['id']) }}">Modo Mecânico (requer PIN)</a>
+  </div>
+
+  <div class="muted text-xs mt-4">
+    Dica: se você é mecânico, use o botão <b>Modo Mecânico</b>. Se você é cliente/atendente, use <b>Visualizar OS</b>.
+  </div>
+</div>
+{% endblock %}

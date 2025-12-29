@@ -1,0 +1,15 @@
+================== FCAR Reparação Automotiva ==================
+Acesse: http://127.0.0.1:5055/
+ * Serving Flask app 'app'
+ * Debug mode: on
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5055
+ * Running on http://10.3.152.21:5055
+Press CTRL+C to quit
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 285-719-112
+127.0.0.1 - - [23/Dec/2025 18:18:05] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [23/Dec/2025 18:18:05] "GET /static/logo.png HTTP/1.1" 304 -
+127.0.0.1 - - [23/Dec/2025 18:18:05] "GET /favicon.ico HTTP/1.1" 404 -

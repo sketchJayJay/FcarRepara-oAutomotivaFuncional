@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="max-w-6xl mx-auto py-6 text-gray-100">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-semibold">Relatório por Mecânico</h1>
+    <form method="get" class="flex flex-wrap items-end gap-2 text-sm">
+      <div>
+        <label class="block text-xs text-gray-400">De</label>
+        <input type="date" name="start"
+               value="{{ start.strftime('%Y-%m-%d') }}"
+               class="rounded-lg bg-black/40 border border-zinc-700 px-2 py-1 text-xs">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400">Até</label>
+        <input type="date" name="end"
+               value="{{ end.strftime('%Y-%m-%d') }}"
+               class="rounded-lg bg-black/40 border border-zinc-700 px-2 py-1 text-xs">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400">% Repasse mecânico</label>
+        <input type="number" name="repasse" min="0" max="100" step="1"
+               value="{{ summary.repasse_percent|int }}"
+               class="w-24 rounded-lg bg-black/40 border border-zinc-700 px-2 py-1 text-xs">
+      </div>
+      <button type="submit"
+              class="px-3 py-1 rounded-lg bg-red-500 hover:bg-red-600 text-xs font-semibold">
+        Atualizar
+      </button>
+    </form>
+  </div>
+
+  <!-- Cards resumo -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 text-sm">
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 px-4 py-3">
+      <p class="text-xs text-gray-400">Total de OS no período</p>
+      <p class="text-xl font-semibold mt-1">{{ summary.total_os }}</p>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 px-4 py-3">
+      <p class="text-xs text-gray-400">Faturamento Total</p>
+      <p class="text-xl font-semibold mt-1">{{ summary.total_geral|money }}</p>
+      <p class="text-[10px] text-gray-500 mt-1">
+        Mão de Obra: {{ summary.total_labor|money }} • Peças: {{ summary.total_parts|money }}
+      </p>
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 px-4 py-3">
+      <p class="text-xs text-gray-400">Mecânico com maior faturamento</p>
+      {% if summary.top_faturamento %}
+        <p class="text-sm font-semibold mt-1">
+          {{ summary.top_faturamento.mechanic }} — {{ summary.top_faturamento.total|money }}
+        </p>
+      {% else %}
+        <p class="text-sm mt-1 text-gray-500">Sem dados no período.</p>
+      {% endif %}
+    </div>
+    <div class="rounded-2xl bg-black/40 border border-zinc-800 px-4 py-3">
+      <p class="text-xs text-gray-400">Mecânico com mais OS</p>
+      {% if summary.top_os %}
+        <p class="text-sm font-semibold mt-1">
+          {{ summary.top_os.mechanic }} — {{ summary.top_os.qtd_os }} OS
+        </p>
+      {% else %}
+        <p class="text-sm mt-1 text-gray-500">Sem dados no período.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Tabela por mecânico -->
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 mb-6 overflow-hidden">
+    <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between text-sm">
+      <span class="font-semibold">Resumo por Mecânico</span>
+      <span class="text-xs text-gray-400">Repasse: {{ summary.repasse_percent }}% sobre o total</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-xs md:text-sm">
+        <thead class="bg-black/40 text-gray-300">
+          <tr>
+            <th class="px-3 py-2 text-left">Mecânico</th>
+            <th class="px-3 py-2 text-right">Nº OS</th>
+            <th class="px-3 py-2 text-right">Mão de Obra</th>
+            <th class="px-3 py-2 text-right">Peças</th>
+            <th class="px-3 py-2 text-right">Total</th>
+            <th class="px-3 py-2 text-right">Ticket Médio</th>
+            <th class="px-3 py-2 text-right">% Mão de Obra</th>
+            <th class="px-3 py-2 text-right">Repasse</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="border-t border-zinc-800 hover:bg-black/40">
+            <td class="px-3 py-2">{{ r.mechanic }}</td>
+            <td class="px-3 py-2 text-right">{{ r.qtd_os }}</td>
+            <td class="px-3 py-2 text-right">{{ r.soma_mao_obra|money }}</td>
+            <td class="px-3 py-2 text-right">{{ r.soma_pecas|money }}</td>
+            <td class="px-3 py-2 text-right font-semibold">{{ r.total|money }}</td>
+            <td class="px-3 py-2 text-right">{{ r.ticket_medio|money }}</td>
+            <td class="px-3 py-2 text-right">
+              {{ '%.1f'|format(r.perc_mao_obra) }}%
+            </td>
+            <td class="px-3 py-2 text-right text-emerald-400 font-semibold">
+              {{ r.repasse_valor|money }}
+            </td>
+          </tr>
+          {% endfor %}
+          {% if rows|length == 0 %}
+          <tr>
+            <td colspan="8" class="px-3 py-4 text-center text-xs text-gray-500">
+              Nenhum dado para o período selecionado.
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Gráfico -->
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4 mb-6">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-sm font-semibold">Gráfico de Faturamento por Mecânico</h2>
+      <p class="text-[10px] text-gray-500">Mão de obra x Peças x Total</p>
+    </div>
+    <canvas id="chartMecanicos" height="120"></canvas>
+  </div>
+
+  <!-- Detalhamento por OS -->
+  <div class="rounded-2xl bg-black/40 border border-zinc-800 p-4">
+    <h2 class="text-sm font-semibold mb-3">Detalhamento por OS</h2>
+    {% for r in rows %}
+      <div class="mb-4">
+        <h3 class="text-xs md:text-sm font-semibold text-red-400 mb-1">
+          {{ r.mechanic }} — {{ r.total|money }} ({{ r.qtd_os }} OS)
+        </h3>
+        <div class="overflow-x-auto rounded-xl border border-zinc-800 bg-black/40">
+          <table class="min-w-full text-[11px] md:text-xs">
+            <thead class="bg-black/40 text-gray-300">
+              <tr>
+                <th class="px-2 py-1 text-left">OS</th>
+                <th class="px-2 py-1 text-left">Data</th>
+                <th class="px-2 py-1 text-left">Cliente</th>
+                <th class="px-2 py-1 text-left">Placa</th>
+                <th class="px-2 py-1 text-right">Mão de Obra</th>
+                <th class="px-2 py-1 text-right">Peças</th>
+                <th class="px-2 py-1 text-right">Total OS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% set ns = namespace(found=false) %}
+              {% for os in os_rows if os.mechanic_id == r.mech_id %}
+                {% set ns.found = true %}
+                <tr class="border-t border-zinc-800 hover:bg-black/50">
+                  <td class="px-2 py-1">#{{ os.id }}</td>
+                  <td class="px-2 py-1">
+                    {{ os.created_at[:10] | replace('-', '/') }}
+                  </td>
+                  <td class="px-2 py-1">{{ os.client_name }}</td>
+                  <td class="px-2 py-1">{{ os.plate or '-' }}</td>
+                  <td class="px-2 py-1 text-right">{{ os.labor|money }}</td>
+                  <td class="px-2 py-1 text-right">{{ os.soma_pecas|money }}</td>
+                  <td class="px-2 py-1 text-right font-semibold">{{ os.total_os|money }}</td>
+                </tr>
+              {% endfor %}
+              {% if not ns.found %}
+                <tr>
+                  <td colspan="7" class="px-2 py-2 text-center text-[10px] text-gray-500">
+                    Nenhuma OS para este mecânico no período.
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const mechLabels = {{ rows | map(attribute='mechanic') | list | tojson }};
+  const dataMaoObra = {{ rows | map(attribute='soma_mao_obra') | list | tojson }};
+  const dataPecas   = {{ rows | map(attribute='soma_pecas') | list | tojson }};
+  const dataTotal   = {{ rows | map(attribute='total') | list | tojson }};
+
+  const ctx = document.getElementById('chartMecanicos').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: mechLabels,
+      datasets: [
+        {
+          label: 'Mão de Obra',
+          data: dataMaoObra,
+          backgroundColor: 'rgba(239, 68, 68, 0.8)',
+        },
+        {
+          label: 'Peças',
+          data: dataPecas,
+          backgroundColor: 'rgba(244, 114, 182, 0.8)',
+        },
+        {
+          label: 'Total',
+          data: dataTotal,
+          backgroundColor: 'rgba(248, 250, 252, 0.9)',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        x: {
+          ticks: { color: '#e5e7eb' },
+          grid: { display: false }
+        },
+        y: {
+          ticks: { color: '#e5e7eb' },
+          grid: { color: 'rgba(148, 163, 184, 0.2)' }
+        }
+      },
+      plugins: {
+        legend: {
+          labels: { color: '#e5e7eb' }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const v = ctx.parsed.y || 0;
+              return ctx.dataset.label + ': R$ ' + v.toFixed(2).replace('.', ',');
+            }
+          }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}

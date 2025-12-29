@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="flex flex-col gap-4">
+
+  <!-- Cabeçalho -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold headline">Painel do Cliente</h1>
+      <p class="muted text-sm">Dados do cliente, veículos e ordens de serviço em um só lugar.</p>
+    </div>
+    <div class="flex gap-2">
+      <a href="{{ url_for('clientes') }}" class="btn alt">Voltar para clientes</a>
+      <a href="{{ url_for('os_new') }}?client_id={{ c.id }}" class="btn">Nova OS para este cliente</a>
+    </div>
+  </div>
+
+  <!-- Dados do cliente -->
+  <div class="glass p-4">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="font-semibold">{{ c.name }}</h2>
+      <a href="{{ url_for('cliente_edit', cid=c.id) }}" class="btn alt text-sm">Editar cliente</a>
+    </div>
+    <div class="grid md:grid-cols-3 gap-2 text-sm">
+      <div><span class="muted">Telefone:</span> {{ c.phone or '-' }}</div>
+      <div><span class="muted">CPF:</span> {{ c.cpf or '-' }}</div>
+      <div><span class="muted">Endereço:</span> {{ c.address or '-' }}</div>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <!-- Veículos -->
+    <div class="glass p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold text-sm">Veículos do cliente</h2>
+        <span class="tag">{{ vs|length }} registro(s)</span>
+      </div>
+
+      <!-- Cadastro rápido -->
+      <form method="post" class="grid grid-cols-4 gap-2 mb-3 text-sm">
+        <input type="text" name="plate" class="field col-span-1" placeholder="Placa" required>
+        <input type="text" name="model" class="field col-span-2" placeholder="Modelo">
+        <input type="number" name="year" class="field col-span-1" placeholder="Ano">
+        <button class="btn col-span-4">Adicionar veículo</button>
+      </form>
+
+      {% if vs %}
+      <table class="text-sm w-full">
+        <thead>
+          <tr>
+            <th class="text-left">Placa</th>
+            <th class="text-left">Modelo</th>
+            <th class="text-left">Ano</th>
+            <th class="text-right">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in vs %}
+          <tr>
+            <td>{{ v.plate }}</td>
+            <td>{{ v.model }}</td>
+            <td>{{ v.year or '-' }}</td>
+            <td class="text-right">
+              <!-- Excluir veículo -->
+              <form method="post"
+                    action="{{ url_for('veiculo_delete', client_id=c.id, vehicle_id=v.id) }}"
+                    class="inline-block"
+                    onsubmit="return confirm('Tem certeza que deseja excluir este veículo? As OS vão continuar, só sem o vínculo com o veículo.');">
+                <button type="submit" class="btn alt text-xs">Excluir</button>
+              </form>
+
+              <!-- Buscar cliente para transferir -->
+              <form method="post"
+                    action="{{ url_for('veiculo_transferir', client_id=c.id, vehicle_id=v.id) }}"
+                    class="inline-block mt-1 client-transfer-form">
+                <div class="relative inline-block">
+                  <input type="hidden" name="new_client_id" value="">
+                  <input type="text"
+                         name="new_client_query"
+                         class="field text-xs inline-block client-search-input"
+                         placeholder="Nome do cliente">
+                  <div class="client-search-results hidden absolute left-0 mt-1 w-full glass text-xs max-h-48 overflow-y-auto z-20">
+                    <!-- sugestões via JS -->
+                  </div>
+                </div>
+                <button type="submit" class="btn alt text-xs mt-1">
+                  Transferir
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted text-sm">Nenhum veículo cadastrado ainda.</p>
+      {% endif %}
+    </div>
+
+    <!-- Ações rápidas -->
+    <div class="glass p-4 flex flex-col gap-3">
+      <h2 class="font-semibold text-sm">Ações rápidas</h2>
+      <a href="{{ url_for('os_new') }}?client_id={{ c.id }}" class="btn">
+        Abrir nova OS para este cliente
+      </a>
+      <p class="muted text-xs">
+        A tela de Nova OS já vai carregar este cliente e os veículos dele.
+      </p>
+    </div>
+  </div>
+
+  <!-- OS do cliente -->
+  <div class="glass p-4">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="font-semibold text-sm">Ordens de Serviço do cliente</h2>
+      <div class="flex items-center gap-2">
+        <input id="os-placa-filter"
+               type="text"
+               class="field text-xs"
+               placeholder="Buscar OS por placa (ex: ABC1234)">
+        <span class="tag">{{ os_rows|length }} OS</span>
+      </div>
+    </div>
+    {% if os_rows %}
+    <div class="overflow-x-auto">
+      <table id="tabela-os-cliente" class="text-sm w-full">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Data</th>
+            <th>Placa</th>
+            <th>Modelo</th>
+            <th>Mecânico</th>
+            <th>Status</th>
+            <th class="text-right">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in os_rows %}
+          <tr>
+            <td>#{{ o.id }}</td>
+            <td>{{ o.created_at }}</td>
+            <td data-placa>{{ o.plate or '-' }}</td>
+            <td>{{ o.model or '-' }}</td>
+            <td>{{ o.mech or '-' }}</td>
+            <td>{{ o.status }}</td>
+            <td class="text-right">
+              <a href="{{ url_for('os_view', os_id=o.id) }}" class="btn alt text-xs">Ver</a>
+              <a href="{{ url_for('os_edit', os_id=o.id) }}" class="btn alt text-xs">Editar</a>
+              <form method="post"
+                    action="{{ url_for('os_delete', os_id=o.id) }}"
+                    class="inline-block mt-1"
+                    onsubmit="return confirm('Tem certeza que deseja excluir a OS #{{ o.id }}?');">
+                <input type="hidden" name="next" value="{{ url_for('veiculos', client_id=c.id) }}">
+                <button type="submit" class="btn alt text-xs">Excluir</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted text-sm">Ainda não há OS para este cliente.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Script: filtro por placa nas OS + autocomplete de cliente para transferência -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // Filtro por placa na tabela de OS
+  const inputFiltro = document.getElementById('os-placa-filter');
+  const tabela = document.getElementById('tabela-os-cliente');
+  if (inputFiltro && tabela) {
+    const linhas = tabela.querySelectorAll('tbody tr');
+    inputFiltro.addEventListener('input', function () {
+      const termo = this.value.trim().toUpperCase();
+      linhas.forEach(function (tr) {
+        const celPlaca = tr.querySelector('[data-placa]');
+        const placa = (celPlaca ? celPlaca.innerText : '').toUpperCase();
+        if (!termo || placa.indexOf(termo) !== -1) {
+          tr.style.display = '';
+        } else {
+          tr.style.display = 'none';
+        }
+      });
+    });
+  }
+
+  // Autocomplete simples para transferência de cliente (se o endpoint existir)
+  const forms = document.querySelectorAll('.client-transfer-form');
+  forms.forEach(function (form) {
+    const inputBusca = form.querySelector('.client-search-input');
+    const hiddenId = form.querySelector('input[name="new_client_id"]');
+    const resultsBox = form.querySelector('.client-search-results');
+
+    if (!inputBusca || !hiddenId || !resultsBox) return;
+
+    let timeout = null;
+
+    inputBusca.addEventListener('input', function () {
+      const q = this.value.trim();
+      hiddenId.value = ''; // limpa seleção
+
+      if (timeout) clearTimeout(timeout);
+      if (!q) {
+        resultsBox.classList.add('hidden');
+        resultsBox.innerHTML = '';
+        return;
+      }
+
+      timeout = setTimeout(function () {
+        fetch(`/api/clientes/busca?q=${encodeURIComponent(q)}`)
+          .then(r => r.json())
+          .then(data => {
+            resultsBox.innerHTML = '';
+            if (!data.length) {
+              resultsBox.classList.remove('hidden');
+              resultsBox.innerHTML = '<div class="px-2 py-1 muted">Nenhum cliente encontrado.</div>';
+              return;
+            }
+            data.forEach(function (item) {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'w-full text-left px-2 py-1 hover:bg-white/10';
+              btn.textContent = item.name + (item.phone ? ' - ' + item.phone : '');
+              btn.addEventListener('click', function () {
+                inputBusca.value = item.name;
+                hiddenId.value = item.id;
+                resultsBox.classList.add('hidden');
+              });
+              resultsBox.appendChild(btn);
+            });
+            resultsBox.classList.remove('hidden');
+          })
+          .catch(() => {
+            // Se der erro na API, só esconde
+            resultsBox.classList.add('hidden');
+          });
+      }, 250);
+    });
+
+    // Esconde a caixinha ao clicar fora
+    document.addEventListener('click', function (ev) {
+      if (!form.contains(ev.target)) {
+        resultsBox.classList.add('hidden');
+      }
+    });
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+{% block body %}
+
+<div class="section-title">Editar OS #{{ o.id }}</div>
+
+<div class="card">
+  <form method="post">
+
+    <!-- Cliente, status e mecânico -->
+    <div class="flex gap">
+      <div style="flex: 2">
+        <label>Cliente</label>
+        <input class="field" value="{{ o.client_name }}" disabled>
+      </div>
+
+      <div style="flex: 1">
+        <label>Status</label>
+        {% set st = o.status or 'Aberta' %}
+        <select class="field" name="status">
+          <option value="Aberta" {% if st == 'Aberta' %}selected{% endif %}>Aberta</option>
+          <option value="Em andamento" {% if st == 'Em andamento' %}selected{% endif %}>Em andamento</option>
+          <option value="Fechada" {% if st == 'Fechada' %}selected{% endif %}>Fechada</option>
+          <option value="Cancelada" {% if st == 'Cancelada' %}selected{% endif %}>Cancelada</option>
+        </select>
+      </div>
+
+      
+      <div style="flex: 1">
+        <label>Pagamento</label>
+        {% set pm = (o.pay_method or 'Dinheiro') %}
+        <select class="field" name="pay_method">
+          <option value="Dinheiro" {% if pm == 'Dinheiro' %}selected{% endif %}>Dinheiro</option>
+          <option value="Pix" {% if pm == 'Pix' %}selected{% endif %}>Pix</option>
+          <option value="Cartão Débito" {% if pm == 'Cartão Débito' %}selected{% endif %}>Cartão Débito</option>
+          <option value="Cartão Crédito" {% if pm == 'Cartão Crédito' %}selected{% endif %}>Cartão Crédito</option>
+          <option value="Boleto" {% if pm == 'Boleto' %}selected{% endif %}>Boleto</option>
+          <option value="Transferência" {% if pm == 'Transferência' %}selected{% endif %}>Transferência</option>
+        </select>
+      </div>
+
+      <div style="flex: 1">
+        <label>Status do pagamento</label>
+        {% set ps = (o.pay_status or 'Pendente') %}
+        <select class="field" name="pay_status">
+          <option value="Pendente" {% if ps == 'Pendente' %}selected{% endif %}>Pendente</option>
+          <option value="Efetivado" {% if ps == 'Efetivado' %}selected{% endif %}>Efetivado</option>
+          <option value="Cancelado" {% if ps == 'Cancelado' %}selected{% endif %}>Cancelado</option>
+        </select>
+      </div>
+
+<div style="flex: 1">
+        <label>Mecânico</label>
+        <select class="field" name="mechanic_id">
+          <option value="">(sem mecânico)</option>
+          {% for m in mechs %}
+            <option value="{{ m.id }}" {% if m.id == o.mechanic_id %}selected{% endif %}>
+              {{ m.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- Veículo + mão de obra -->
+    <div class="flex gap" style="margin-top: 10px">
+      <div>
+        <label>Placa</label>
+        <input class="field" name="vehicle_plate" value="{{ o.plate or '' }}">
+      </div>
+      <div style="flex: 1">
+        <label>Modelo / descrição do veículo</label>
+        <input class="field" name="vehicle_text" value="{{ o.model or '' }}">
+      </div>
+      <div>
+        <label>Mão de obra (R$)</label>
+        <input class="field" type="number" step="0.01" name="labor" value="{{ o.labor or 0 }}">
+      </div>
+    </div>
+
+    <!-- Observações -->
+    <div style="margin-top: 15px">
+      <label>Observações</label>
+      <textarea class="field" name="notes" rows="4">{{ o.notes or '' }}</textarea>
+    </div>
+
+    <!-- Busca de peça no estoque -->
+    <div class="card" style="margin-top: 20px; padding: 10px;">
+      <label>Buscar peça no estoque</label>
+      <div class="flex gap" style="margin-top: 5px; align-items: center;">
+        <input class="field" type="text" id="searchEstoque" placeholder="Digite nome ou código (SKU)">
+        <button type="button" class="btn" onclick="buscarEstoque()">Buscar</button>
+      </div>
+      <div id="resultadoEstoque" style="margin-top: 8px; max-height: 220px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; display: none; padding: 5px;">
+        <!-- resultados da busca aparecem aqui -->
+      </div>
+      <p style="font-size: 12px; color: #777; margin-top: 4px;">
+        Clique em um item da lista para preencher a próxima linha vazia da tabela de itens.
+      </p>
+    </div>
+
+    <!-- Itens da OS -->
+    <h3 style="margin-top: 20px">Itens da OS</h3>
+    <p style="font-size: 12px; color: #777; margin-bottom: 5px">
+      Para excluir um item, basta apagar a descrição da linha.
+    </p>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Descrição</th>
+          <th style="width: 80px">Qtd</th>
+          <th style="width: 120px">Vlr unit.</th>
+          <th style="width: 120px">Total atual</th>
+          <th style="width: 130px">É mão de obra?</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_rows = 20 %}
+        {% for i in range(1, max_rows + 1) %}
+          {% set item = its[i-1] if i-1 < its|length else None %}
+          <tr>
+            <td>{{ i }}</td>
+            <td>
+              <input class="field"
+                     name="item_desc_{{ i }}"
+                     value="{{ item.description if item else '' }}">
+              <input type="hidden"
+                     name="item_inv_{{ i }}"
+                     value="{{ item.inventory_id if item and item.inventory_id else '' }}">
+            </td>
+            <td>
+              <input class="field"
+                     type="number"
+                     step="0.01"
+                     name="item_qty_{{ i }}"
+                     value="{{ item.qty if item else '' }}">
+            </td>
+            <td>
+              <input class="field"
+                     type="number"
+                     step="0.01"
+                     name="item_price_{{ i }}"
+                     value="{{ item.unit_price if item else '' }}">
+            </td>
+            <td>
+              {% if item %}
+                {{ item.total|money }}
+              {% endif %}
+            </td>
+            <td style="text-align: center">
+              <input type="checkbox"
+                     name="item_is_labor_{{ i }}"
+                     value="1"
+                     {% if item and (item.is_labor or item['is_labor']) %}checked{% endif %}>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    
+<div class="card" style="margin-top: 15px; padding: 12px;">
+  <div style="font-weight: 600; margin-bottom: 8px;">Resumo automático (tempo real)</div>
+
+  <div class="flex gap" style="flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+    <div style="min-width: 180px;"><span class="muted">Peças (saída):</span> <b id="resPecas">R$ 0,00</b></div>
+    <div style="min-width: 180px;"><span class="muted">Mão de obra:</span> <b id="resMO">R$ 0,00</b></div>
+    <div style="min-width: 200px;"><span class="muted">Serviços extras:</span> <b id="resServExtra">R$ 0,00</b></div>
+    <div style="min-width: 220px;"><span class="muted">Total serviços (entrada):</span> <b id="resServTotal">R$ 0,00</b></div>
+    <div style="min-width: 200px;"><span class="muted">Total geral (entrada):</span> <b id="resTotal">R$ 0,00</b></div>
+  </div>
+
+  <div class="flex gap" style="flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 260px;">
+      <div class="muted" style="margin-bottom: 6px;">Peças usadas (saída)</div>
+      <ul id="listaPecas" style="margin:0; padding-left: 18px;"></ul>
+    </div>
+    <div style="flex: 1; min-width: 260px;">
+      <div class="muted" style="margin-bottom: 6px;">Serviços (entrada)</div>
+      <ul id="listaServicos" style="margin:0; padding-left: 18px;"></ul>
+    </div>
+  </div>
+
+  <div class="muted" style="margin-top: 8px; font-size: 12px;">
+    Dica: marque “É mão de obra?” para serviços extras (ex.: “Troca de óleo”, “Limpeza bico”, “Scanner”, etc.).
+  </div>
+</div>
+<div style="margin-top: 15px; text-align: right">
+      <a class="btn" href="{{ url_for('os_view', os_id=o.id) }}">Cancelar</a>
+      <button class="btn primary">Salvar alterações</button>
+    </div>
+
+  </form>
+</div>
+
+<script>
+  const MAX_ROWS = 20;
+
+  function limparResultados() {
+    const box = document.getElementById('resultadoEstoque');
+    box.innerHTML = '';
+    box.style.display = 'none';
+  }
+
+  function buscarEstoque() {
+    const q = document.getElementById('searchEstoque').value.trim();
+    const box = document.getElementById('resultadoEstoque');
+
+    if (!q) {
+      limparResultados();
+      return;
+    }
+
+    fetch(`/api/inventory_search?q=${encodeURIComponent(q)}&limit=30`)
+      .then(r => r.json())
+      .then(data => {
+        box.innerHTML = '';
+        if (!data || data.length === 0) {
+          box.innerHTML = '<div style="font-size:12px; color:#999;">Nenhum item encontrado.</div>';
+          box.style.display = 'block';
+          return;
+        }
+
+        const list = document.createElement('div');
+        data.forEach(item => {
+          const row = document.createElement('div');
+          row.style.padding = '4px 6px';
+          row.style.cursor = 'pointer';
+          row.style.fontSize = '13px';
+          row.style.borderBottom = '1px solid #eee';
+
+          row.innerHTML = `
+            <strong>${item.name}</strong><br>
+            <span style="color:#555;">Preço: R$ ${Number(item.price || 0).toFixed(2)} | Estoque: ${item.stock}</span>
+          `;
+
+          row.addEventListener('mouseover', () => {
+            row.style.backgroundColor = '#f5f5f5';
+          });
+          row.addEventListener('mouseout', () => {
+            row.style.backgroundColor = 'transparent';
+          });
+
+          row.addEventListener('click', () => {
+            adicionarItemDaPeca(item);
+            limparResultados();
+            document.getElementById('searchEstoque').value = '';
+          });
+
+          list.appendChild(row);
+        });
+
+        box.appendChild(list);
+        box.style.display = 'block';
+      })
+      .catch(err => {
+        console.error(err);
+        box.innerHTML = '<div style="font-size:12px; color:#c00;">Erro ao buscar estoque.</div>';
+        box.style.display = 'block';
+      });
+  }
+
+  function adicionarItemDaPeca(item) {
+    for (let i = 1; i <= MAX_ROWS; i++) {
+      const desc = document.querySelector(`input[name="item_desc_${i}"]`);
+      const qty = document.querySelector(`input[name="item_qty_${i}"]`);
+      const price = document.querySelector(`input[name="item_price_${i}"]`);
+      const inv = document.querySelector(`input[name="item_inv_${i}"]`);
+
+      if (!desc) continue;
+
+      if (!desc.value.trim()) {
+        desc.value = item.name;
+        if (qty) qty.value = qty.value || 1;
+        if (price) price.value = (item.price || 0).toString().replace(',', '.');
+        if (inv) inv.value = item.id;
+        try {
+          desc.focus();
+        } catch(e) {}
+        break;
+      }
+    }
+  }
+
+  // Enter no campo de busca dispara a função buscarEstoque
+  document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('searchEstoque');
+    if (input) {
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          buscarEstoque();
+        }
+      });
+    }
+  });
+
+function _parseNum(v){
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  v = String(v).replace(',', '.');
+  const n = parseFloat(v);
+  return isFinite(n) ? n : 0;
+}
+function _brl(n){
+  try { return (n || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
+  catch(e){ return 'R$ ' + (Number(n||0).toFixed(2)).replace('.', ','); }
+}
+
+function atualizarResumoOS(){
+  const labor = _parseNum(document.querySelector('input[name="labor"]')?.value);
+
+  let pecasTotal = 0;
+  let servExtraTotal = 0;
+
+  const pecas = [];
+  const servs = [];
+
+  for (let i = 1; i <= MAX_ROWS; i++){
+    const desc = document.querySelector(`input[name="item_desc_${i}"]`)?.value?.trim() || '';
+    if (!desc) continue;
+
+    const qty = _parseNum(document.querySelector(`input[name="item_qty_${i}"]`)?.value || 1) || 1;
+    const price = _parseNum(document.querySelector(`input[name="item_price_${i}"]`)?.value || 0);
+    const isLabor = !!document.querySelector(`input[name="item_is_labor_${i}"]`)?.checked;
+
+    const total = qty * price;
+
+    if (isLabor){
+      servExtraTotal += total;
+      servs.push(`${desc} (${qty} x ${_brl(price)} = ${_brl(total)})`);
+    } else {
+      pecasTotal += total;
+      pecas.push(`${desc} (${qty} x ${_brl(price)} = ${_brl(total)})`);
+    }
+  }
+
+  const servTotal = labor + servExtraTotal;
+  const totalGeral = pecasTotal + servTotal;
+
+  document.getElementById('resPecas').textContent = _brl(pecasTotal);
+  document.getElementById('resMO').textContent = _brl(labor);
+  document.getElementById('resServExtra').textContent = _brl(servExtraTotal);
+  document.getElementById('resServTotal').textContent = _brl(servTotal);
+  document.getElementById('resTotal').textContent = _brl(totalGeral);
+
+  const ulP = document.getElementById('listaPecas');
+  const ulS = document.getElementById('listaServicos');
+  if (ulP){
+    ulP.innerHTML = (pecas.length ? pecas : ['(nenhuma peça)']).map(t => `<li>${t}</li>`).join('');
+  }
+  if (ulS){
+    const base = labor > 0 ? [`Mão de obra (${_brl(labor)})`] : [];
+    const all = base.concat(servs);
+    ulS.innerHTML = (all.length ? all : ['(nenhum serviço)']).map(t => `<li>${t}</li>`).join('');
+  }
+}
+
+// Atualiza resumo quando mexer em qualquer campo
+document.addEventListener('input', (ev) => {
+  const n = ev.target?.name || '';
+  if (n.startsWith('item_') || n === 'labor' || n === 'pay_method' || n === 'pay_status' || n === 'status'){
+    atualizarResumoOS();
+  }
+});
+document.addEventListener('change', (ev) => {
+  const n = ev.target?.name || '';
+  if (n.startsWith('item_') || n === 'labor' || n === 'pay_method' || n === 'pay_status' || n === 'status'){
+    atualizarResumoOS();
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  atualizarResumoOS();
+});
+</script>
+
+{% endblock %}
