@@ -963,19 +963,32 @@ def relatorio_mecanicos():
     # Agregado por mecânico
     raw_rows = db.execute(
         """
-        SELECT m.id AS mech_id,
-               m.name AS mechanic,
-               COUNT(DISTINCT o.id) AS qtd_os,
-               COALESCE(SUM(o.labor), 0) AS soma_mao_obra,
-               COALESCE(SUM(oi.total), 0) AS soma_pecas,
-               COALESCE(SUM(o.labor) + SUM(oi.total), 0) AS total
-        FROM mechanics m
-        LEFT JOIN orders o
-               ON o.mechanic_id = m.id
-              AND o.created_at BETWEEN ? AND ?
-        LEFT JOIN order_items oi ON oi.order_id = o.id
-        GROUP BY m.id, m.name
-        ORDER BY total DESC
+        WITH os AS (
+    SELECT id, mechanic_id, labor
+    FROM orders
+    WHERE created_at BETWEEN ? AND ?
+),
+it AS (
+    SELECT
+        order_id,
+        COALESCE(SUM(CASE WHEN is_labor=1 THEN total ELSE 0 END), 0) AS soma_itens_mao,
+        COALESCE(SUM(CASE WHEN is_labor=0 THEN total ELSE 0 END), 0) AS soma_pecas,
+        COALESCE(SUM(total), 0) AS soma_itens_total
+    FROM order_items
+    GROUP BY order_id
+)
+SELECT
+    m.id   AS mech_id,
+    m.name AS mechanic,
+    COALESCE(COUNT(os.id), 0) AS qtd_os,
+    COALESCE(SUM(os.labor), 0) + COALESCE(SUM(it.soma_itens_mao), 0) AS soma_mao_obra,
+    COALESCE(SUM(it.soma_pecas), 0) AS soma_pecas,
+    COALESCE(SUM(os.labor), 0) + COALESCE(SUM(it.soma_itens_total), 0) AS total
+FROM mechanics m
+LEFT JOIN os ON os.mechanic_id = m.id
+LEFT JOIN it ON it.order_id = os.id
+GROUP BY m.id, m.name
+ORDER BY total DESC
         """,
         (start_ts, end_ts),
     ).fetchall()
@@ -1037,23 +1050,24 @@ def relatorio_mecanicos():
     os_rows = db.execute(
         """
         SELECT
-            o.id,
-            o.mechanic_id,
-            m.name AS mechanic,
-            o.created_at,
-            c.name AS client_name,
-            v.plate,
-            COALESCE(o.labor, 0) AS labor,
-            COALESCE(SUM(oi.total), 0) AS soma_pecas,
-            COALESCE(SUM(oi.total), 0) + COALESCE(o.labor, 0) AS total_os
-        FROM orders o
-        JOIN mechanics m ON m.id = o.mechanic_id
-        JOIN clients c ON c.id = o.client_id
-        LEFT JOIN vehicles v ON v.id = o.vehicle_id
-        LEFT JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.created_at BETWEEN ? AND ?
-        GROUP BY o.id
-        ORDER BY m.name, o.id DESC
+    o.id,
+    o.mechanic_id,
+    m.name AS mechanic,
+    o.created_at,
+    c.name AS client_name,
+    v.plate,
+    COALESCE(o.labor, 0) + COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END), 0) AS labor,
+    COALESCE(SUM(CASE WHEN oi.is_labor=0 THEN oi.total ELSE 0 END), 0) AS soma_pecas,
+    (COALESCE(o.labor, 0) + COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END), 0))
+      + COALESCE(SUM(CASE WHEN oi.is_labor=0 THEN oi.total ELSE 0 END), 0) AS total_os
+FROM orders o
+JOIN mechanics m ON m.id = o.mechanic_id
+LEFT JOIN vehicles v ON v.id = o.vehicle_id
+JOIN clients c ON c.id = o.client_id
+LEFT JOIN order_items oi ON oi.order_id = o.id
+WHERE o.created_at BETWEEN ? AND ?
+GROUP BY o.id
+ORDER BY o.created_at DESC
         """,
         (start_ts, end_ts),
     ).fetchall()
@@ -2492,7 +2506,7 @@ def qr_generic():
     data = request.args.get("data") or request.host_url
     return _qr_image(data)
 
-@app.route("/qr/os/<int:os_id>", endpoint="qr_os_alt")
+@app.route("/qr/os/<int:os_id>")
 def qr_os_alt(os_id):
     url = url_for("os_view", os_id=os_id, _external=True)
     return _qr_image(url)
