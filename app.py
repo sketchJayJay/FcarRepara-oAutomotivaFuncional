@@ -817,6 +817,14 @@ def os_new():
                 ]
             )
 
+        # --- sync financeiro (OS -> lançamento PENDENTE/EFETIVADO/CANCELADO)
+        try:
+            rcn = db.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+            client_name = rcn["name"] if rcn else None
+            sync_os_to_finance(db, os_id, client_name, "Aberta", "Dinheiro", "Pendente", base_labor, items)
+        except Exception as e:
+            print("ERRO sync_os_to_finance (os_new):", e)
+
         db.commit()
         flash(f"OS #{os_id} criada!", "ok")
         return redirect(url_for("os_view", os_id=os_id))
@@ -964,31 +972,35 @@ def relatorio_mecanicos():
     raw_rows = db.execute(
         """
         WITH os AS (
-    SELECT id, mechanic_id, labor
-    FROM orders
-    WHERE created_at BETWEEN ? AND ?
-),
-it AS (
-    SELECT
-        order_id,
-        COALESCE(SUM(CASE WHEN is_labor=1 THEN total ELSE 0 END), 0) AS soma_itens_mao,
-        COALESCE(SUM(CASE WHEN is_labor=0 THEN total ELSE 0 END), 0) AS soma_pecas,
-        COALESCE(SUM(total), 0) AS soma_itens_total
-    FROM order_items
-    GROUP BY order_id
-)
-SELECT
-    m.id   AS mech_id,
-    m.name AS mechanic,
-    COALESCE(COUNT(os.id), 0) AS qtd_os,
-    COALESCE(SUM(os.labor), 0) + COALESCE(SUM(it.soma_itens_mao), 0) AS soma_mao_obra,
-    COALESCE(SUM(it.soma_pecas), 0) AS soma_pecas,
-    COALESCE(SUM(os.labor), 0) + COALESCE(SUM(it.soma_itens_total), 0) AS total
-FROM mechanics m
-LEFT JOIN os ON os.mechanic_id = m.id
-LEFT JOIN it ON it.order_id = os.id
-GROUP BY m.id, m.name
-ORDER BY total DESC
+            SELECT id, mechanic_id, labor, created_at
+            FROM orders
+            WHERE created_at BETWEEN ? AND ?
+        ),
+        agg AS (
+            SELECT mechanic_id,
+                   COUNT(DISTINCT id) AS qtd_os,
+                   COALESCE(SUM(labor), 0) AS base_labor
+            FROM os
+            GROUP BY mechanic_id
+        ),
+        itens AS (
+            SELECT o.mechanic_id AS mechanic_id,
+                   COALESCE(SUM(CASE WHEN oi.is_labor = 1 THEN oi.total ELSE 0 END), 0) AS itens_mao_obra,
+                   COALESCE(SUM(CASE WHEN oi.is_labor = 0 THEN oi.total ELSE 0 END), 0) AS itens_pecas
+            FROM os o
+            LEFT JOIN order_items oi ON oi.order_id = o.id
+            GROUP BY o.mechanic_id
+        )
+        SELECT m.id AS mech_id,
+               m.name AS mechanic,
+               COALESCE(a.qtd_os, 0) AS qtd_os,
+               (COALESCE(a.base_labor, 0) + COALESCE(i.itens_mao_obra, 0)) AS soma_mao_obra,
+               COALESCE(i.itens_pecas, 0) AS soma_pecas,
+               (COALESCE(a.base_labor, 0) + COALESCE(i.itens_mao_obra, 0) + COALESCE(i.itens_pecas, 0)) AS total
+        FROM mechanics m
+        LEFT JOIN agg a ON a.mechanic_id = m.id
+        LEFT JOIN itens i ON i.mechanic_id = m.id
+        ORDER BY total DESC
         """,
         (start_ts, end_ts),
     ).fetchall()
@@ -1050,24 +1062,23 @@ ORDER BY total DESC
     os_rows = db.execute(
         """
         SELECT
-    o.id,
-    o.mechanic_id,
-    m.name AS mechanic,
-    o.created_at,
-    c.name AS client_name,
-    v.plate,
-    COALESCE(o.labor, 0) + COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END), 0) AS labor,
-    COALESCE(SUM(CASE WHEN oi.is_labor=0 THEN oi.total ELSE 0 END), 0) AS soma_pecas,
-    (COALESCE(o.labor, 0) + COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END), 0))
-      + COALESCE(SUM(CASE WHEN oi.is_labor=0 THEN oi.total ELSE 0 END), 0) AS total_os
-FROM orders o
-JOIN mechanics m ON m.id = o.mechanic_id
-LEFT JOIN vehicles v ON v.id = o.vehicle_id
-JOIN clients c ON c.id = o.client_id
-LEFT JOIN order_items oi ON oi.order_id = o.id
-WHERE o.created_at BETWEEN ? AND ?
-GROUP BY o.id
-ORDER BY o.created_at DESC
+            o.id,
+            o.mechanic_id,
+            m.name AS mechanic,
+            o.created_at,
+            c.name AS client_name,
+            v.plate,
+            COALESCE(o.labor, 0) AS labor,
+            COALESCE(SUM(oi.total), 0) AS soma_pecas,
+            COALESCE(SUM(oi.total), 0) + COALESCE(o.labor, 0) AS total_os
+        FROM orders o
+        JOIN mechanics m ON m.id = o.mechanic_id
+        JOIN clients c ON c.id = o.client_id
+        LEFT JOIN vehicles v ON v.id = o.vehicle_id
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.created_at BETWEEN ? AND ?
+        GROUP BY o.id
+        ORDER BY m.name, o.id DESC
         """,
         (start_ts, end_ts),
     ).fetchall()
@@ -1657,11 +1668,11 @@ def sync_os_to_finance(
     """Cria/atualiza lançamento do financeiro baseado na OS + detalhamento (serviços/peças e estoque)."""
     os_st = (os_status or "").strip().lower()
     ps = (pay_status or "").strip().lower()
-    should_launch = (os_st in ["fechada", "cancelada"]) or (ps in ["efetivado", "pago", "paga", "recebido", "recebida"])
-    if not should_launch:
-        # Não lança no financeiro enquanto a OS não estiver fechada (ou paga).
-        return
 
+    # Sempre sincroniza a OS com o Financeiro:
+    # - Aberta/Em andamento -> PENDENTE
+    # - Fechada + Efetivado -> EFETIVADO
+    # - Cancelada/Cancelado -> CANCELADO
     items_total = sum(float(it.get("total") or 0) for it in (items or []))
     total = float(base_labor or 0) + float(items_total or 0)
 
