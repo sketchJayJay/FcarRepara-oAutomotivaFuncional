@@ -2492,8 +2492,8 @@ def qr_generic():
     data = request.args.get("data") or request.host_url
     return _qr_image(data)
 
-@app.route("/qr/os/<int:os_id>")
-def qr_os(os_id):
+@app.route("/qr/os/<int:os_id>", endpoint="qr_os_alt")
+def qr_os_alt(os_id):
     url = url_for("os_view", os_id=os_id, _external=True)
     return _qr_image(url)
 
