@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  fcar:
+    build: .
+    ports:
+      - "5055:5055"
+    environment:
+      - PORT=5055
+      - DB_PATH=/data/oficina.db
+    volumes:
+      - fcar_data:/data
+
+volumes:
+  fcar_data:

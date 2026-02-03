@@ -1,0 +1,18 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs / PID
+*.log
+*.pid
+
+# Local DB (se não quiser versionar dados)
+*.db
+
+# Env
+.env
+.env.*

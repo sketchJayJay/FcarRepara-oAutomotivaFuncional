@@ -11,14 +11,21 @@ try:
 except Exception:
     qrcode = None
 APP_TITLE = "FCAR Reparação Automotiva"
-DB_PATH = os.path.join(os.path.dirname(__file__), "oficina.db")
+
+BASE_DIR = os.path.dirname(__file__)
+# Suporta volume persistente no Coolify/Docker via env DB_PATH.
+# Mantém compatibilidade com o caminho antigo (./oficina.db) se existir.
+LEGACY_DB_PATH = os.path.join(BASE_DIR, "oficina.db")
+DEFAULT_DB_PATH = os.path.join(BASE_DIR, "data", "oficina.db")
+DB_PATH = os.environ.get("DB_PATH") or (LEGACY_DB_PATH if os.path.exists(LEGACY_DB_PATH) and not os.path.exists(DEFAULT_DB_PATH) else DEFAULT_DB_PATH)
 
 app = Flask(__name__)
-app.secret_key = "dev-2cp-mec"
+app.secret_key = os.environ.get("SECRET_KEY", "dev-2cp-mec")
 
 def get_db():
     db = getattr(g, "_db", None)
     if db is None:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         db = g._db = sqlite3.connect(DB_PATH)
         db.row_factory = sqlite3.Row
     return db
@@ -750,7 +757,9 @@ def os_new():
         notes = request.form.get("notes", "").strip()
         base_labor = float(request.form.get("labor") or 0)
         mechanic_id = int(request.form.get("mechanic_id") or 0) or None
-        created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Permite informar a data da OS (útil para lançar OS antigas). Se não vier, usa agora.
+        created_at_default = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        created_at = _parse_created_at_form(request.form.get("created_at"), created_at_default)
 
         if not client_id:
             flash("Selecione um cliente.", "error")
@@ -821,7 +830,7 @@ def os_new():
         try:
             rcn = db.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
             client_name = rcn["name"] if rcn else None
-            sync_os_to_finance(db, os_id, client_name, "Aberta", "Dinheiro", "Pendente", base_labor, items)
+            sync_os_to_finance(db, os_id, client_name, "Aberta", "Dinheiro", "Pendente", base_labor, items, created_at)
         except Exception as e:
             print("ERRO sync_os_to_finance (os_new):", e)
 
@@ -836,7 +845,15 @@ def os_new():
            ORDER BY v.id DESC"""
     ).fetchall()
     mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-    return render_template("os_new.html", clients=clients, vehicles=vehicles, mechs=mechs, title="Nova OS")
+    created_at_default = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
+    return render_template(
+        "os_new.html",
+        clients=clients,
+        vehicles=vehicles,
+        mechs=mechs,
+        created_at_default=created_at_default,
+        title="Nova OS",
+    )
 
 @app.route("/os/<int:os_id>")
 def os_view(os_id):
@@ -1275,6 +1292,9 @@ def os_edit(os_id):
         notes = (request.form.get("notes") or "").strip()
         base_labor = float(request.form.get("labor") or 0)
 
+        # Permite alterar a data da OS (created_at). Se não vier, mantém a atual.
+        created_at = _parse_created_at_form(request.form.get("created_at"), o.get("created_at"))
+
         mechanic_raw = request.form.get("mechanic_id")
         mechanic_id = int(mechanic_raw) if mechanic_raw else None
 
@@ -1352,9 +1372,9 @@ def os_edit(os_id):
             notes = f"{notes}\n\n{extra}" if notes else extra
 
         
-        # --- estoque automático: baixa apenas quando a OS estiver FECHADA ---
-        # Se faltar peça para a diferença (delta), não deixa fechar para não estourar o estoque
-        if _is_os_closed(status):
+        # --- estoque automático: baixa quando a OS estiver EM ANDAMENTO ou FECHADA ---
+        # Se faltar peça para a diferença (delta), não deixa colocar EM ANDAMENTO/FECHAR para não estourar o estoque
+        if _is_os_consuming_stock(status):
             applied_map = _get_os_applied_parts(db, os_id)
             desired_map = _desired_parts_from_items(items)
             delta_plus = {}
@@ -1364,7 +1384,7 @@ def os_edit(os_id):
                     delta_plus[int(inv_id)] = dlt
             faltas = _check_stock_for_delta(db, delta_plus)
             if faltas:
-                msg = "Estoque insuficiente para fechar a OS. Ajuste as quantidades: " + "; ".join(
+                msg = "Estoque insuficiente para colocar a OS em andamento/fechar. Ajuste as quantidades: " + "; ".join(
                     [f"{f['name']} (tem {int(f['have'])}, precisa +{f['need']:.2f})" for f in faltas]
                 )
                 flash(msg, "error")
@@ -1378,6 +1398,7 @@ def os_edit(os_id):
                     "labor": base_labor,
                     "mechanic_id": mechanic_id,
                     "vehicle_id": vehicle_id,
+                    "created_at": created_at,
                 })
                 return render_template(
                     "os_edit.html",
@@ -1387,11 +1408,12 @@ def os_edit(os_id):
                     title=f"Editar OS #{os_id}",
                 )
 
-# 4) Atualiza a OS (mantém created_at)
+        # 4) Atualiza a OS (inclui created_at)
         db.execute(
             """
             UPDATE orders
                SET vehicle_id = ?,
+                   created_at = ?,
                    status = ?,
                    notes = ?,
                    labor = ?,
@@ -1400,7 +1422,7 @@ def os_edit(os_id):
                    pay_status = ?
              WHERE id = ?
             """,
-            (vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
+            (vehicle_id, created_at, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
         )
 
         # 5) Reinsere itens (peças e serviços extras)
@@ -1418,7 +1440,7 @@ def os_edit(os_id):
 
         # --- sync financeiro (OS -> lançamento + detalhamento)
         try:
-            sync_os_to_finance(db, os_id, o.get("client_name"), status, pay_method, pay_status, base_labor, items)
+            sync_os_to_finance(db, os_id, o.get("client_name"), status, pay_method, pay_status, base_labor, items, created_at)
         except Exception:
             pass
 
@@ -1519,6 +1541,36 @@ def _parse_date(s: str|None, default: str) -> str:
             return default
     return s
 
+def _parse_created_at_form(raw: str | None, fallback: str | None) -> str:
+    """Converte o valor do input HTML (datetime-local/date) para 'YYYY-MM-DD HH:MM:SS'.
+
+    Aceita:
+      - YYYY-MM-DDTHH:MM  (datetime-local)
+      - YYYY-MM-DD HH:MM[:SS]
+      - YYYY-MM-DD        (date)
+    """
+    fb = (fallback or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    s = (raw or "").strip()
+    if not s:
+        return fb
+
+    try:
+        if "T" in s:
+            dt = datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M")
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        if len(s) == 10:
+            dt = datetime.datetime.strptime(s, "%Y-%m-%d")
+            return dt.strftime("%Y-%m-%d 00:00:00")
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                dt = datetime.datetime.strptime(s, fmt)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return fb
+
 def _get_method_id(db, name: str) -> int|None:
     if not name:
         return None
@@ -1576,6 +1628,13 @@ def _is_os_closed(status: str | None) -> bool:
     s = (status or "").strip().lower()
     return s in ("fechada", "fechado", "finalizada", "finalizado", "concluida", "concluída", "concluido", "concluído")
 
+def _is_os_consuming_stock(status: str | None) -> bool:
+    """Retorna True se a OS deve baixar estoque (Em andamento ou Fechada/Finalizada/etc)."""
+    s = (status or "").strip().lower()
+    if s in ("em andamento", "andamento", "em execução", "em execucao", "executando", "em andamento "):
+        return True
+    return _is_os_closed(status)
+
 def _get_os_applied_parts(db, os_id: int) -> dict[int, float]:
     rows = db.execute(
         "SELECT inventory_id, qty FROM os_stock_applied WHERE os_id = ?",
@@ -1626,11 +1685,11 @@ def _check_stock_for_delta(db, delta_needed: dict[int, float]) -> list[dict]:
 
 def reconcile_os_stock(db, os_id: int, os_status: str, items: list) -> tuple[bool, list[dict]]:
     """Aplica (ou desfaz) a baixa de estoque da OS com base no status.
-    - Se FECHADA: aplica delta entre 'desired' e 'applied'
-    - Caso contrário: desfaz tudo que já estava aplicado
+    - Se EM ANDAMENTO ou FECHADA/FINALIZADA: aplica delta entre 'desired' e 'applied'
+    - Caso contrário (Aberta/Cancelada): desfaz tudo que já estava aplicado
     """
     applied = _get_os_applied_parts(db, os_id)
-    desired = _desired_parts_from_items(items) if _is_os_closed(os_status) else {}
+    desired = _desired_parts_from_items(items) if _is_os_consuming_stock(os_status) else {}
 
     # calcula delta positivo (o que precisa BAIXAR a mais)
     delta_plus: dict[int, float] = {}
@@ -1663,9 +1722,10 @@ def sync_os_to_finance(
     pay_status: str,
     base_labor: float,
     items: list,
+    os_created_at: str | None = None,
 ):
-    closed = _is_os_closed(os_status)
     """Cria/atualiza lançamento do financeiro baseado na OS + detalhamento (serviços/peças e estoque)."""
+    consuming = _is_os_consuming_stock(os_status)
     os_st = (os_status or "").strip().lower()
     ps = (pay_status or "").strip().lower()
 
@@ -1684,6 +1744,15 @@ def sync_os_to_finance(
 
     tx_status = _tx_status_from_pay(pay_status, os_status)
     tx_date = _today_iso()
+    try:
+        src = os_created_at
+        if not src:
+            row = db.execute("SELECT created_at FROM orders WHERE id=?", (os_id,)).fetchone()
+            src = row["created_at"] if row else None
+        if src:
+            tx_date = (str(src).strip().split(" ")[0] or tx_date)
+    except Exception:
+        pass
 
     existing = db.execute(
         "SELECT id FROM fin_transactions WHERE ref_type='OS' AND ref_id=?",
@@ -1734,7 +1803,7 @@ def sync_os_to_finance(
         rows.append(("money", "IN", int(inv_id) if inv_id else None, d, qty, unit, tot))
 
         # estoque: saída (somente para peças vinculadas ao estoque)
-        if closed and (not is_labor) and inv_id:
+        if consuming and (not is_labor) and inv_id:
             rows.append(("stock", "OUT", int(inv_id), d, qty, 0.0, 0.0))
 
     _rebuild_fin_tx_items(db, fin_tx_id, rows)
@@ -2493,8 +2562,9 @@ if __name__ == "__main__":
     if first_time:
         print("Banco criado em", DB_PATH)
     print(f"================== {APP_TITLE} ==================")
-    print("Acesse: http://127.0.0.1:5055/")
-    app.run(host="0.0.0.0", port=5055, debug=True)
+    port = int(os.environ.get("PORT", 5055))
+    print(f"Acesse: http://127.0.0.1:{port}/")
+    app.run(host="0.0.0.0", port=port, debug=True)
 
 
 def _qr_image(data: str):
@@ -2509,7 +2579,8 @@ def _qr_image(data: str):
 def acesso():
     # URL base para os mecânicos acessarem (mesma rede)
     ip = get_local_ip()
-    url = f"http://{ip}:5055/"
+    port = int(os.environ.get("PORT", 5055))
+    url = f"http://{ip}:{port}/"
     return render_template("acesso.html", url=url, title="Acesso para Mecânicos")
 
 @app.route("/qr")
