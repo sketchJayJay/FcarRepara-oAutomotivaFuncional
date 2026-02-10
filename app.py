@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import os, sqlite3, datetime, io, socket
+import os, sqlite3, datetime, io, socket, csv
 import qrcode
 from flask import Flask, g, render_template, request, redirect, url_for, flash, jsonify, send_file, session
 import functools
@@ -11,21 +11,21 @@ try:
 except Exception:
     qrcode = None
 APP_TITLE = "FCAR Reparação Automotiva"
-
-BASE_DIR = os.path.dirname(__file__)
-# Suporta volume persistente no Coolify/Docker via env DB_PATH.
-# Mantém compatibilidade com o caminho antigo (./oficina.db) se existir.
-LEGACY_DB_PATH = os.path.join(BASE_DIR, "oficina.db")
-DEFAULT_DB_PATH = os.path.join(BASE_DIR, "data", "oficina.db")
-DB_PATH = os.environ.get("DB_PATH") or (LEGACY_DB_PATH if os.path.exists(LEGACY_DB_PATH) and not os.path.exists(DEFAULT_DB_PATH) else DEFAULT_DB_PATH)
-
+DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "oficina.db")
+DB_PATH = os.getenv("FCAR_DB_PATH") or os.getenv("DB_PATH") or DEFAULT_DB_PATH
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-2cp-mec")
+app.secret_key = "dev-2cp-mec"
 
 def get_db():
     db = getattr(g, "_db", None)
     if db is None:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        # garante pasta do banco (quando FCAR_DB_PATH aponta para um volume/disco)
+        try:
+            d = os.path.dirname(DB_PATH)
+            if d:
+                os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
         db = g._db = sqlite3.connect(DB_PATH)
         db.row_factory = sqlite3.Row
     return db
@@ -285,6 +285,25 @@ def init_db():
     db.commit()
 
 
+
+def _csv_response(filename: str, header: list[str], rows: list[tuple]):
+    """
+    Retorna CSV como download (bom pra salvar/abrir no Excel).
+    """
+    sio = io.StringIO()
+    w = csv.writer(sio, delimiter=";")
+    w.writerow(header)
+    for r in rows:
+        w.writerow(r)
+    data = sio.getvalue().encode("utf-8-sig")  # BOM pra Excel abrir acentos ok
+    return send_file(
+        io.BytesIO(data),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 def fmt_money(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -330,6 +349,7 @@ def logout():
     return redirect(url_for("login"))
 
 
+@login_required
 @login_required
 @app.route("/")
 def index():
@@ -738,6 +758,350 @@ def os_list():
         end=d_end,
         title="Ordens de Serviço"
     )
+# =========================
+# Exportações (backup rápido)
+# =========================
+
+@login_required
+@app.route("/export/os.csv")
+def export_os_csv():
+    """
+    Exporta lista de OS (com filtros iguais da tela /os) em CSV.
+    Ideal para guardar e imprimir depois.
+    """
+    db = get_db()
+    status = request.args.get("status", "").strip()
+    mech_id = request.args.get("mechanic_id", "").strip()
+    d_start = request.args.get("start", "").strip()
+    d_end = request.args.get("end", "").strip()
+    q = request.args.get("q", "").strip()
+
+    where = []
+    params = []
+
+    if status:
+        where.append("o.status = ?")
+        params.append(status)
+    if mech_id:
+        try:
+            mech_int = int(mech_id)
+            where.append("o.mechanic_id = ?")
+            params.append(mech_int)
+        except ValueError:
+            mech_id = ""
+
+    if d_start:
+        try:
+            ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
+            where.append("o.created_at >= ?")
+            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+        except ValueError:
+            d_start = ""
+    if d_end:
+        try:
+            de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
+            where.append("o.created_at <= ?")
+            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+        except ValueError:
+            d_end = ""
+
+    if q:
+        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like])
+
+    sql = """
+        SELECT o.id, o.created_at, o.status, o.labor, o.pay_method, o.pay_status,
+               c.name AS client_name,
+               v.plate, v.model,
+               m.name AS mech,
+               COALESCE(SUM(oi.total),0) AS total_itens,
+               COALESCE(SUM(oi.total),0) + COALESCE(o.labor,0) AS total_geral
+        FROM orders o
+        JOIN clients c ON c.id=o.client_id
+        LEFT JOIN vehicles v ON v.id=o.vehicle_id
+        LEFT JOIN mechanics m ON m.id=o.mechanic_id
+        LEFT JOIN order_items oi ON oi.order_id=o.id
+    """
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " GROUP BY o.id ORDER BY o.id DESC"
+
+    rows = db.execute(sql, params).fetchall()
+
+    out = []
+    for r in rows:
+        out.append((
+            r["id"],
+            (r["created_at"] or "")[:19],
+            r["client_name"],
+            r["plate"] or "",
+            r["model"] or "",
+            r["mech"] or "",
+            r["status"] or "",
+            float(r["labor"] or 0),
+            float(r["total_itens"] or 0),
+            float(r["total_geral"] or 0),
+            r["pay_method"] or "",
+            r["pay_status"] or "",
+        ))
+
+    return _csv_response(
+        "fcar_os.csv",
+        ["ID","Data","Cliente","Placa","Modelo","Mecânico","Status","Mão de obra","Total peças","Total OS","Forma pagto","Status pagto"],
+        out
+    )
+
+@login_required
+@app.route("/export/os_itens.csv")
+def export_os_itens_csv():
+    """
+    Exporta itens das OS (uma linha por item).
+    Ótimo como "backup detalhado" (peças/serviços).
+    """
+    db = get_db()
+
+    # usa os mesmos filtros da tela /os
+    status = request.args.get("status", "").strip()
+    mech_id = request.args.get("mechanic_id", "").strip()
+    d_start = request.args.get("start", "").strip()
+    d_end = request.args.get("end", "").strip()
+    q = request.args.get("q", "").strip()
+
+    where = []
+    params = []
+
+    if status:
+        where.append("o.status = ?")
+        params.append(status)
+    if mech_id:
+        try:
+            mech_int = int(mech_id)
+            where.append("o.mechanic_id = ?")
+            params.append(mech_int)
+        except ValueError:
+            mech_id = ""
+
+    if d_start:
+        try:
+            ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
+            where.append("o.created_at >= ?")
+            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+        except ValueError:
+            d_start = ""
+    if d_end:
+        try:
+            de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
+            where.append("o.created_at <= ?")
+            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+        except ValueError:
+            d_end = ""
+
+    if q:
+        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like])
+
+    sql = """
+        SELECT o.id AS os_id, o.created_at, o.status,
+               c.name AS client_name,
+               v.plate, v.model,
+               m.name AS mech,
+               oi.description, oi.qty, oi.unit_price, oi.total, oi.is_labor
+        FROM orders o
+        JOIN clients c ON c.id=o.client_id
+        LEFT JOIN vehicles v ON v.id=o.vehicle_id
+        LEFT JOIN mechanics m ON m.id=o.mechanic_id
+        LEFT JOIN order_items oi ON oi.order_id=o.id
+    """
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY o.id DESC, oi.id ASC"
+
+    rows = db.execute(sql, params).fetchall()
+
+    out = []
+    for r in rows:
+        out.append((
+            r["os_id"],
+            (r["created_at"] or "")[:19],
+            r["client_name"],
+            r["plate"] or "",
+            r["model"] or "",
+            r["mech"] or "",
+            r["status"] or "",
+            r["description"] or "",
+            float(r["qty"] or 0),
+            float(r["unit_price"] or 0),
+            float(r["total"] or 0),
+            int(r["is_labor"] or 0),
+        ))
+
+    return _csv_response(
+        "fcar_os_itens.csv",
+        ["OS_ID","Data","Cliente","Placa","Modelo","Mecânico","Status","Item/Serviço","Qtd","Unitário","Total","is_labor"],
+        out
+    )
+
+
+
+
+@login_required
+@app.route("/print/os")
+def print_os():
+    """
+    Página enxuta para imprimir/salvar PDF com Ctrl+P.
+    Usa os mesmos filtros da tela /os.
+    """
+    db = get_db()
+    status = request.args.get("status", "").strip()
+    mech_id = request.args.get("mechanic_id", "").strip()
+    d_start = request.args.get("start", "").strip()
+    d_end = request.args.get("end", "").strip()
+    q = request.args.get("q", "").strip()
+
+    where = []
+    params = []
+
+    if status:
+        where.append("o.status = ?")
+        params.append(status)
+    if mech_id:
+        try:
+            mech_int = int(mech_id)
+            where.append("o.mechanic_id = ?")
+            params.append(mech_int)
+        except ValueError:
+            mech_id = ""
+
+    if d_start:
+        try:
+            ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
+            where.append("o.created_at >= ?")
+            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+        except ValueError:
+            d_start = ""
+    if d_end:
+        try:
+            de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
+            where.append("o.created_at <= ?")
+            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+        except ValueError:
+            d_end = ""
+
+    if q:
+        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like])
+
+    sql = """
+        SELECT o.id, o.created_at, o.status, o.labor, o.pay_method, o.pay_status,
+               c.name AS client_name,
+               v.plate, v.model,
+               m.name AS mech,
+               COALESCE(SUM(oi.total),0) AS total_itens,
+               COALESCE(SUM(oi.total),0) + COALESCE(o.labor,0) AS total_geral
+        FROM orders o
+        JOIN clients c ON c.id=o.client_id
+        LEFT JOIN vehicles v ON v.id=o.vehicle_id
+        LEFT JOIN mechanics m ON m.id=o.mechanic_id
+        LEFT JOIN order_items oi ON oi.order_id=o.id
+    """
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " GROUP BY o.id ORDER BY o.id DESC"
+
+    rows = db.execute(sql, params).fetchall()
+    return render_template("print_os.html", rows=rows, title="Impressão de OS")
+
+
+@login_required
+@app.route("/export/clientes.csv")
+def export_clientes_csv():
+    """
+    Exporta lista de clientes em CSV.
+    """
+    db = get_db()
+    q = request.args.get("q", "").strip()
+    if q:
+        rows = db.execute(
+            """
+            SELECT id, name, phone, cpf, address
+            FROM clients
+            WHERE name LIKE ? OR phone LIKE ? OR cpf LIKE ?
+            ORDER BY name
+            """,
+            (f"%{q}%", f"%{q}%", f"%{q}%")
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT id, name, phone, cpf, address FROM clients ORDER BY name").fetchall()
+
+    out = []
+    for r in rows:
+        out.append((r["id"], r["name"], r["phone"] or "", r["cpf"] or "", r["address"] or ""))
+
+    return _csv_response(
+        "fcar_clientes.csv",
+        ["ID","Nome","Telefone","CPF","Endereço"],
+        out
+    )
+
+
+@login_required
+@app.route("/print/clientes")
+def print_clientes():
+    """
+    Página enxuta para imprimir/salvar PDF com Ctrl+P (clientes).
+    """
+    db = get_db()
+    q = request.args.get("q", "").strip()
+    if q:
+        rows = db.execute(
+            """
+            SELECT id, name, phone, cpf, address
+            FROM clients
+            WHERE name LIKE ? OR phone LIKE ? OR cpf LIKE ?
+            ORDER BY name
+            """,
+            (f"%{q}%", f"%{q}%", f"%{q}%")
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT id, name, phone, cpf, address FROM clients ORDER BY name").fetchall()
+
+    return render_template("print_clientes.html", rows=rows, q=q, title="Impressão de Clientes")
+
+
+
+
+
+@login_required
+@app.route("/export/backup.sql")
+def export_backup_sql():
+    """
+    Dump completo do banco SQLite em SQL (backup real).
+    Atenção: contém dados sensíveis. Guarde bem.
+    """
+    # abre uma conexão separada pra usar iterdump com segurança
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        sio = io.StringIO()
+        for line in conn.iterdump():
+            sio.write(line + "\n")
+        data = sio.getvalue().encode("utf-8")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/sql",
+        as_attachment=True,
+        download_name="fcar_backup.sql"
+    )
+
+
 
 
 @login_required
@@ -757,9 +1121,7 @@ def os_new():
         notes = request.form.get("notes", "").strip()
         base_labor = float(request.form.get("labor") or 0)
         mechanic_id = int(request.form.get("mechanic_id") or 0) or None
-        # Permite informar a data da OS (útil para lançar OS antigas). Se não vier, usa agora.
-        created_at_default = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        created_at = _parse_created_at_form(request.form.get("created_at"), created_at_default)
+        created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if not client_id:
             flash("Selecione um cliente.", "error")
@@ -830,7 +1192,7 @@ def os_new():
         try:
             rcn = db.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
             client_name = rcn["name"] if rcn else None
-            sync_os_to_finance(db, os_id, client_name, "Aberta", "Dinheiro", "Pendente", base_labor, items, created_at)
+            sync_os_to_finance(db, os_id, client_name, "Aberta", "Dinheiro", "Pendente", base_labor, items)
         except Exception as e:
             print("ERRO sync_os_to_finance (os_new):", e)
 
@@ -845,15 +1207,7 @@ def os_new():
            ORDER BY v.id DESC"""
     ).fetchall()
     mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-    created_at_default = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
-    return render_template(
-        "os_new.html",
-        clients=clients,
-        vehicles=vehicles,
-        mechs=mechs,
-        created_at_default=created_at_default,
-        title="Nova OS",
-    )
+    return render_template("os_new.html", clients=clients, vehicles=vehicles, mechs=mechs, title="Nova OS")
 
 @app.route("/os/<int:os_id>")
 def os_view(os_id):
@@ -1292,9 +1646,6 @@ def os_edit(os_id):
         notes = (request.form.get("notes") or "").strip()
         base_labor = float(request.form.get("labor") or 0)
 
-        # Permite alterar a data da OS (created_at). Se não vier, mantém a atual.
-        created_at = _parse_created_at_form(request.form.get("created_at"), o.get("created_at"))
-
         mechanic_raw = request.form.get("mechanic_id")
         mechanic_id = int(mechanic_raw) if mechanic_raw else None
 
@@ -1372,9 +1723,9 @@ def os_edit(os_id):
             notes = f"{notes}\n\n{extra}" if notes else extra
 
         
-        # --- estoque automático: baixa quando a OS estiver EM ANDAMENTO ou FECHADA ---
-        # Se faltar peça para a diferença (delta), não deixa colocar EM ANDAMENTO/FECHAR para não estourar o estoque
-        if _is_os_consuming_stock(status):
+        # --- estoque automático: baixa apenas quando a OS estiver FECHADA ---
+        # Se faltar peça para a diferença (delta), não deixa fechar para não estourar o estoque
+        if _is_os_closed(status):
             applied_map = _get_os_applied_parts(db, os_id)
             desired_map = _desired_parts_from_items(items)
             delta_plus = {}
@@ -1384,7 +1735,7 @@ def os_edit(os_id):
                     delta_plus[int(inv_id)] = dlt
             faltas = _check_stock_for_delta(db, delta_plus)
             if faltas:
-                msg = "Estoque insuficiente para colocar a OS em andamento/fechar. Ajuste as quantidades: " + "; ".join(
+                msg = "Estoque insuficiente para fechar a OS. Ajuste as quantidades: " + "; ".join(
                     [f"{f['name']} (tem {int(f['have'])}, precisa +{f['need']:.2f})" for f in faltas]
                 )
                 flash(msg, "error")
@@ -1398,7 +1749,6 @@ def os_edit(os_id):
                     "labor": base_labor,
                     "mechanic_id": mechanic_id,
                     "vehicle_id": vehicle_id,
-                    "created_at": created_at,
                 })
                 return render_template(
                     "os_edit.html",
@@ -1408,12 +1758,11 @@ def os_edit(os_id):
                     title=f"Editar OS #{os_id}",
                 )
 
-        # 4) Atualiza a OS (inclui created_at)
+# 4) Atualiza a OS (mantém created_at)
         db.execute(
             """
             UPDATE orders
                SET vehicle_id = ?,
-                   created_at = ?,
                    status = ?,
                    notes = ?,
                    labor = ?,
@@ -1422,7 +1771,7 @@ def os_edit(os_id):
                    pay_status = ?
              WHERE id = ?
             """,
-            (vehicle_id, created_at, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
+            (vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
         )
 
         # 5) Reinsere itens (peças e serviços extras)
@@ -1440,7 +1789,7 @@ def os_edit(os_id):
 
         # --- sync financeiro (OS -> lançamento + detalhamento)
         try:
-            sync_os_to_finance(db, os_id, o.get("client_name"), status, pay_method, pay_status, base_labor, items, created_at)
+            sync_os_to_finance(db, os_id, o.get("client_name"), status, pay_method, pay_status, base_labor, items)
         except Exception:
             pass
 
@@ -1541,36 +1890,6 @@ def _parse_date(s: str|None, default: str) -> str:
             return default
     return s
 
-def _parse_created_at_form(raw: str | None, fallback: str | None) -> str:
-    """Converte o valor do input HTML (datetime-local/date) para 'YYYY-MM-DD HH:MM:SS'.
-
-    Aceita:
-      - YYYY-MM-DDTHH:MM  (datetime-local)
-      - YYYY-MM-DD HH:MM[:SS]
-      - YYYY-MM-DD        (date)
-    """
-    fb = (fallback or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    s = (raw or "").strip()
-    if not s:
-        return fb
-
-    try:
-        if "T" in s:
-            dt = datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M")
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
-        if len(s) == 10:
-            dt = datetime.datetime.strptime(s, "%Y-%m-%d")
-            return dt.strftime("%Y-%m-%d 00:00:00")
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-            try:
-                dt = datetime.datetime.strptime(s, fmt)
-                return dt.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return fb
-
 def _get_method_id(db, name: str) -> int|None:
     if not name:
         return None
@@ -1628,13 +1947,6 @@ def _is_os_closed(status: str | None) -> bool:
     s = (status or "").strip().lower()
     return s in ("fechada", "fechado", "finalizada", "finalizado", "concluida", "concluída", "concluido", "concluído")
 
-def _is_os_consuming_stock(status: str | None) -> bool:
-    """Retorna True se a OS deve baixar estoque (Em andamento ou Fechada/Finalizada/etc)."""
-    s = (status or "").strip().lower()
-    if s in ("em andamento", "andamento", "em execução", "em execucao", "executando", "em andamento "):
-        return True
-    return _is_os_closed(status)
-
 def _get_os_applied_parts(db, os_id: int) -> dict[int, float]:
     rows = db.execute(
         "SELECT inventory_id, qty FROM os_stock_applied WHERE os_id = ?",
@@ -1685,11 +1997,11 @@ def _check_stock_for_delta(db, delta_needed: dict[int, float]) -> list[dict]:
 
 def reconcile_os_stock(db, os_id: int, os_status: str, items: list) -> tuple[bool, list[dict]]:
     """Aplica (ou desfaz) a baixa de estoque da OS com base no status.
-    - Se EM ANDAMENTO ou FECHADA/FINALIZADA: aplica delta entre 'desired' e 'applied'
-    - Caso contrário (Aberta/Cancelada): desfaz tudo que já estava aplicado
+    - Se FECHADA: aplica delta entre 'desired' e 'applied'
+    - Caso contrário: desfaz tudo que já estava aplicado
     """
     applied = _get_os_applied_parts(db, os_id)
-    desired = _desired_parts_from_items(items) if _is_os_consuming_stock(os_status) else {}
+    desired = _desired_parts_from_items(items) if _is_os_closed(os_status) else {}
 
     # calcula delta positivo (o que precisa BAIXAR a mais)
     delta_plus: dict[int, float] = {}
@@ -1722,10 +2034,9 @@ def sync_os_to_finance(
     pay_status: str,
     base_labor: float,
     items: list,
-    os_created_at: str | None = None,
 ):
+    closed = _is_os_closed(os_status)
     """Cria/atualiza lançamento do financeiro baseado na OS + detalhamento (serviços/peças e estoque)."""
-    consuming = _is_os_consuming_stock(os_status)
     os_st = (os_status or "").strip().lower()
     ps = (pay_status or "").strip().lower()
 
@@ -1744,15 +2055,6 @@ def sync_os_to_finance(
 
     tx_status = _tx_status_from_pay(pay_status, os_status)
     tx_date = _today_iso()
-    try:
-        src = os_created_at
-        if not src:
-            row = db.execute("SELECT created_at FROM orders WHERE id=?", (os_id,)).fetchone()
-            src = row["created_at"] if row else None
-        if src:
-            tx_date = (str(src).strip().split(" ")[0] or tx_date)
-    except Exception:
-        pass
 
     existing = db.execute(
         "SELECT id FROM fin_transactions WHERE ref_type='OS' AND ref_id=?",
@@ -1803,7 +2105,7 @@ def sync_os_to_finance(
         rows.append(("money", "IN", int(inv_id) if inv_id else None, d, qty, unit, tot))
 
         # estoque: saída (somente para peças vinculadas ao estoque)
-        if consuming and (not is_labor) and inv_id:
+        if closed and (not is_labor) and inv_id:
             rows.append(("stock", "OUT", int(inv_id), d, qty, 0.0, 0.0))
 
     _rebuild_fin_tx_items(db, fin_tx_id, rows)
@@ -2562,9 +2864,8 @@ if __name__ == "__main__":
     if first_time:
         print("Banco criado em", DB_PATH)
     print(f"================== {APP_TITLE} ==================")
-    port = int(os.environ.get("PORT", 5055))
-    print(f"Acesse: http://127.0.0.1:{port}/")
-    app.run(host="0.0.0.0", port=port, debug=True)
+    print("Acesse: http://127.0.0.1:5055/")
+    app.run(host="0.0.0.0", port=5055, debug=True)
 
 
 def _qr_image(data: str):
@@ -2579,8 +2880,7 @@ def _qr_image(data: str):
 def acesso():
     # URL base para os mecânicos acessarem (mesma rede)
     ip = get_local_ip()
-    port = int(os.environ.get("PORT", 5055))
-    url = f"http://{ip}:{port}/"
+    url = f"http://{ip}:5055/"
     return render_template("acesso.html", url=url, title="Acesso para Mecânicos")
 
 @app.route("/qr")

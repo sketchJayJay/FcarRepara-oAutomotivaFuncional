@@ -15,3 +15,30 @@ FCAR - Abrir sem CMD (Windows)
 🛠️ Se der algum problema
 - Rode ABRIR_FCAR_DEBUG.bat para ver erros.
 - Veja o arquivo fcar_start.log na pasta do FCAR.
+
+
+=========================
+ONLINE / NÃO PERDER AS OS
+=========================
+✅ Para não perder OS/Clientes em deploy (Render/Coolify), use um caminho de banco em volume/disco.
+
+1) Crie um volume/disco persistente no servidor e monte em /data
+2) Defina a variável de ambiente:
+   FCAR_DB_PATH=/data/oficina.db
+
+O start.sh já tenta copiar a oficina.db para o disco na primeira execução.
+Depois disso, o banco fica no volume e não some quando atualizar.
+
+=========================
+EXPORTAR (BACKUP RÁPIDO)
+=========================
+Agora existe exportação na tela de OS e Clientes:
+- Exportar CSV (lista)
+- CSV Itens (um item por linha)
+- Imprimir/PDF (abre página para Ctrl+P → Salvar como PDF)
+
+- Backup completo: /export/backup.sql (precisa estar logado)
+
+Se precisar restaurar em um banco novo:
+- python RESTORE_DB_FROM_SQL_DUMP.py fcar_backup.sql
+(define FCAR_DB_PATH para restaurar no volume /data)

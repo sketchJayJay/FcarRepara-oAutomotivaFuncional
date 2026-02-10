@@ -1,39 +1,57 @@
-# FCAR no Coolify (com banco persistente)
+# FCAR Reparação Automotiva (Coolify)
 
-Este projeto já vem com **Dockerfile** e um **seed do banco** (clientes, estoque e OS importadas dos PDFs).
+Este projeto já vai com o **banco `oficina.db` preenchido** (clientes + OS) a partir dos PDFs que você mandou.
 
-## Deploy rápido
+## 1) Subir para o GitHub
 
-1) No Coolify, crie um novo App a partir do seu repositório (GitHub).
+> Importante: o `.gitignore` foi ajustado para **versionar só o `oficina.db`**.
+> Use **repositório privado** (tem dados de clientes).
 
-2) Selecione **Dockerfile** como método de build.
+1. Faça commit e push normalmente.
 
-3) Em **Environment Variables**, configure:
+## 2) Criar o app no Coolify
 
-- `PORT` = `5055` (ou deixe o padrão)
-- `DB_PATH` = `/data/oficina.db`
+1. **New Resource** → Application → **GitHub Repo**
+2. Build: **Dockerfile** (já está no projeto)
 
-4) Em **Persistent Storage / Volumes**, crie um volume apontando para:
+## 3) Variáveis de ambiente
 
-- **Path**: `/data`
+Defina estas variáveis no Coolify:
 
-5) Deploy.
+- `PORT` = `5055` (ou deixe o Coolify definir, mas 5055 é o padrão do projeto)
+- `FCAR_DB_PATH` = `/data/oficina.db`
+- `SECRET_KEY` = (coloque uma chave forte, ex: `fcar-<qualquer-coisa-grande>`)
 
-✅ Na primeira subida, o `docker-entrypoint.sh` copia o banco seed para `/data/oficina.db`. Depois disso, o volume mantém tudo persistente entre updates.
+## 4) Volume persistente (para não perder OS)
 
-## Atualizar sem perder dados
+Crie um **volume** e monte em:
 
-- Faça commit/push das mudanças no GitHub
-- No Coolify, clique em **Redeploy**
-- Como o banco está em `/data`, ele não é sobrescrito.
+- **Mount Path**: `/data`
 
-## Importar novos PDFs no futuro
+O `start.sh` faz isso automaticamente:
 
-Se você tiver outro pacote de PDFs, você pode:
+- Se existir `FCAR_DB_PATH=/data/oficina.db`
+- E **ainda não existir** `/data/oficina.db`
+- Ele copia o `oficina.db` do repositório para dentro do volume.
 
-- Colocar os PDFs no servidor (ou dentro do container) e rodar:
+✅ Resultado: nas próximas atualizações, o banco fica no volume e você não perde nada.
+
+## 5) Conferência rápida (no terminal do container)
+
+No terminal do Coolify, rode:
 
 ```bash
-python import_migracao_pdfs.py --db /data/oficina.db --pdfdir "/caminho/da/pasta"
+ls -lah /data
+python - <<'PY'
+import sqlite3
+db='/data/oficina.db'
+con=sqlite3.connect(db)
+cur=con.cursor()
+print('clients:', cur.execute('select count(*) from clients').fetchone()[0])
+print('orders:',  cur.execute('select count(*) from orders').fetchone()[0])
+print('open:',    cur.execute("select count(*) from orders where status='Aberta'").fetchone()[0])
+print('closed:',  cur.execute("select count(*) from orders where status='Fechada'").fetchone()[0])
+PY
 ```
 
+Se aparecer algo como `orders: 106`, está tudo certo.

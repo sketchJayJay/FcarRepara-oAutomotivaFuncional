@@ -9,17 +9,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
+RUN chmod +x start.sh
 
-# Guarda um seed do banco com dados (para primeiro deploy)
-RUN mkdir -p /app/seed \
- && if [ -f data/oficina.db ]; then cp data/oficina.db /app/seed/oficina.db; fi \
- && chmod +x /app/docker-entrypoint.sh
-
-# Padrões para Docker/Coolify
-ENV PORT=5055
-ENV DB_PATH=/data/oficina.db
-
-VOLUME ["/data"]
+# Coolify/Render definem a variável PORT automaticamente.
 EXPOSE 5055
 
-CMD ["/app/docker-entrypoint.sh"]
+CMD ["bash", "start.sh"]
