@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "Impressão de OS" }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { margin: 0 0 8px 0; font-size: 20px; }
+    .meta { margin: 0 0 16px 0; color: #555; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; }
+    th { background: #f2f2f2; text-align: left; }
+    td.num, th.num { text-align: right; }
+    @media print {
+      body { margin: 0; }
+      .no-print { display: none; }
+      table { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom: 14px;">
+    <button onclick="window.print()">Imprimir / Salvar em PDF</button>
+    <span style="margin-left: 10px; color:#666; font-size:12px;">Dica: Ctrl+P → “Salvar como PDF”.</span>
+  </div>
+
+  <h1>Ordens de Serviço (OS)</h1>
+  <p class="meta">Total: {{ rows|length }} OS</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Data</th>
+        <th>Cliente</th>
+        <th>Placa</th>
+        <th>Modelo</th>
+        <th>Mecânico</th>
+        <th>Status</th>
+        <th class="num">Mão de obra</th>
+        <th class="num">Total peças</th>
+        <th class="num">Total OS</th>
+        <th>Pagamento</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>#{{ r.id }}</td>
+        <td>{{ r.created_at[:10] if r.created_at else "" }}</td>
+        <td>{{ r.client_name }}</td>
+        <td>{{ r.plate or "" }}</td>
+        <td>{{ r.model or "" }}</td>
+        <td>{{ r.mech or "" }}</td>
+        <td>{{ r.status or "" }}</td>
+        <td class="num">{{ "%.2f"|format(r.labor or 0) }}</td>
+        <td class="num">{{ "%.2f"|format(r.total_itens or 0) }}</td>
+        <td class="num">{{ "%.2f"|format(r.total_geral or 0) }}</td>
+        <td>{{ (r.pay_method or "") }} {{ ("(" ~ r.pay_status ~ ")") if r.pay_status else "" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

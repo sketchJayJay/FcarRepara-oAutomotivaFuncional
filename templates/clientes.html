@@ -6,6 +6,10 @@
     <input class="field" type="text" name="q" placeholder="Buscar por nome/telefone/CPF" value="{{ q or '' }}">
     <button class="btn">Buscar</button>
   </form>
+  <div class="flex gap-2">
+    <a class="btn alt" href="{{ url_for('export_clientes_csv') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">Exportar CSV</a>
+    <a class="btn alt" target="_blank" href="{{ url_for('print_clientes') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">Imprimir/PDF</a>
+  </div>
 </div>
 
 <div class="grid md:grid-cols-3 gap-4">

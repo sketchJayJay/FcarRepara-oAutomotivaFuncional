@@ -3,10 +3,23 @@
 <div class="max-w-6xl mx-auto py-6 text-gray-100">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-semibold">Ordens de Serviço</h1>
-    <a href="{{ url_for('os_new') }}"
-       class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">
-      + Nova OS
-    </a>
+    <div class="flex gap-2 flex-wrap justify-end">
+      <a href="{{ url_for('os_new') }}"
+         class="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-semibold">
+        + Nova OS
+      </a>
+
+      <a href="{{ url_for('export_os_csv') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
+         class="px-4 py-2 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-sm font-semibold">
+        Exportar CSV
+      </a>
+
+      <a target="_blank"
+         href="{{ url_for('print_os') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
+         class="px-4 py-2 rounded-xl bg-black/50 hover:bg-black/70 border border-zinc-700 text-sm font-semibold">
+        Imprimir/PDF
+      </a>
+    </div>
   </div>
 
   <form method="get" class="mb-5">

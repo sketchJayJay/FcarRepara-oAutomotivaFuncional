@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "Impressão de Clientes" }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { margin: 0 0 8px 0; font-size: 20px; }
+    .meta { margin: 0 0 16px 0; color: #555; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; }
+    th { background: #f2f2f2; text-align: left; }
+    @media print {
+      body { margin: 0; }
+      .no-print { display: none; }
+      table { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom: 14px;">
+    <button onclick="window.print()">Imprimir / Salvar em PDF</button>
+    <span style="margin-left: 10px; color:#666; font-size:12px;">Dica: Ctrl+P → “Salvar como PDF”.</span>
+  </div>
+
+  <h1>Clientes</h1>
+  {% if q %}<p class="meta">Filtro: "{{ q }}"</p>{% endif %}
+  <p class="meta">Total: {{ rows|length }} clientes</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Nome</th>
+        <th>Telefone</th>
+        <th>CPF</th>
+        <th>Endereço</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.phone or "" }}</td>
+        <td>{{ r.cpf or "" }}</td>
+        <td>{{ r.address or "" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
