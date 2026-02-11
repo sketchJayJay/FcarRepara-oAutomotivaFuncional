@@ -100,7 +100,7 @@
         <tr class="border-b border-zinc-800/70 hover:bg-zinc-900/60">
           <td class="px-4 py-3 text-xs text-gray-400">#{{ r.id }}</td>
           <td class="px-4 py-3 text-xs">
-            {{ r.created_at[:10] if r.created_at }}
+            {{ r.os_date if r.os_date else (r.created_at[:10] if r.created_at) }}
           </td>
           <td class="px-4 py-3">
             {{ r.client_name }}

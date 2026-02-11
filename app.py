@@ -238,7 +238,7 @@ def init_db():
     if "repasse_value" not in cols:
         db.execute("ALTER TABLE inventory ADD COLUMN repasse_value REAL NOT NULL DEFAULT 0")
 
-    # garante colunas novas na OS (pagamento/financeiro)
+    # garante colunas novas na OS (pagamento/financeiro + data editável)
     ocols = [r["name"] for r in db.execute("PRAGMA table_info(orders)").fetchall()]
     if "pay_method" not in ocols:
         db.execute("ALTER TABLE orders ADD COLUMN pay_method TEXT")
@@ -246,7 +246,20 @@ def init_db():
         db.execute("ALTER TABLE orders ADD COLUMN pay_status TEXT")
     if "fin_tx_id" not in ocols:
         db.execute("ALTER TABLE orders ADD COLUMN fin_tx_id INTEGER")
+    # Data da OS (editável). Mantém o created_at como registro, mas usa os_date como a data "de referência" da OS.
+    if "os_date" not in ocols:
+        db.execute("ALTER TABLE orders ADD COLUMN os_date TEXT")
     db.commit()
+
+    # Preenche os_date para bases antigas (se vazio, usa a data do created_at)
+    try:
+        db.execute(
+            "UPDATE orders SET os_date = substr(created_at,1,10) WHERE os_date IS NULL OR os_date = ''"
+        )
+        db.commit()
+    except Exception:
+        pass
+
 
     # garante coluna is_labor em order_items (para serviços na tabela)
     icols = [r["name"] for r in db.execute("PRAGMA table_info(order_items)").fetchall()]
@@ -712,15 +725,15 @@ def os_list():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("o.created_at >= ?")
-            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("o.created_at <= ?")
-            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
@@ -730,7 +743,7 @@ def os_list():
         params.extend([like, like, like])
 
     sql = """
-        SELECT o.id, o.created_at, o.status, o.labor,
+        SELECT o.id, o.created_at, COALESCE(o.os_date, substr(o.created_at,1,10)) AS os_date, o.status, o.labor,
                c.name AS client_name, v.plate, m.name AS mech,
                COALESCE(SUM(oi.total),0) AS total_itens,
                COALESCE(SUM(oi.total),0) + COALESCE(o.labor,0) AS total_geral
@@ -793,15 +806,15 @@ def export_os_csv():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("o.created_at >= ?")
-            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("o.created_at <= ?")
-            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
@@ -811,7 +824,7 @@ def export_os_csv():
         params.extend([like, like, like])
 
     sql = """
-        SELECT o.id, o.created_at, o.status, o.labor, o.pay_method, o.pay_status,
+        SELECT o.id, o.created_at, COALESCE(o.os_date, substr(o.created_at,1,10)) AS os_date, o.status, o.labor, o.pay_method, o.pay_status,
                c.name AS client_name,
                v.plate, v.model,
                m.name AS mech,
@@ -833,7 +846,7 @@ def export_os_csv():
     for r in rows:
         out.append((
             r["id"],
-            (r["created_at"] or "")[:19],
+            (r["os_date"] or (r["created_at"] or "")[:10]),
             r["client_name"],
             r["plate"] or "",
             r["model"] or "",
@@ -885,15 +898,15 @@ def export_os_itens_csv():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("o.created_at >= ?")
-            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("o.created_at <= ?")
-            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
@@ -924,7 +937,7 @@ def export_os_itens_csv():
     for r in rows:
         out.append((
             r["os_id"],
-            (r["created_at"] or "")[:19],
+            (r["os_date"] or (r["created_at"] or "")[:10]),
             r["client_name"],
             r["plate"] or "",
             r["model"] or "",
@@ -977,15 +990,15 @@ def print_os():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("o.created_at >= ?")
-            params.append(ds.strftime("%Y-%m-%d 00:00:00"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("o.created_at <= ?")
-            params.append(de.strftime("%Y-%m-%d 23:59:59"))
+            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
@@ -995,7 +1008,7 @@ def print_os():
         params.extend([like, like, like])
 
     sql = """
-        SELECT o.id, o.created_at, o.status, o.labor, o.pay_method, o.pay_status,
+        SELECT o.id, o.created_at, COALESCE(o.os_date, substr(o.created_at,1,10)) AS os_date, o.status, o.labor, o.pay_method, o.pay_status,
                c.name AS client_name,
                v.plate, v.model,
                m.name AS mech,
@@ -1120,6 +1133,7 @@ def os_new():
 
         notes = request.form.get("notes", "").strip()
         base_labor = float(request.form.get("labor") or 0)
+        os_date = (request.form.get("os_date") or "").strip() or datetime.date.today().strftime("%Y-%m-%d")
         mechanic_id = int(request.form.get("mechanic_id") or 0) or None
         created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1172,9 +1186,9 @@ def os_new():
             notes = f"{notes}\n\n{extra}" if notes else extra
 
         cur = db.execute(
-            """INSERT INTO orders(client_id, vehicle_id, created_at, status, notes, labor, mechanic_id, pay_method, pay_status)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
-            (client_id, vehicle_id, created_at, "Aberta", notes, base_labor, mechanic_id, "Dinheiro", "Pendente")
+            """INSERT INTO orders(client_id, vehicle_id, created_at, os_date, status, notes, labor, mechanic_id, pay_method, pay_status)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (client_id, vehicle_id, created_at, os_date, "Aberta", notes, base_labor, mechanic_id, "Dinheiro", "Pendente")
         )
         os_id = cur.lastrowid
 
@@ -1207,7 +1221,7 @@ def os_new():
            ORDER BY v.id DESC"""
     ).fetchall()
     mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-    return render_template("os_new.html", clients=clients, vehicles=vehicles, mechs=mechs, title="Nova OS")
+    return render_template("os_new.html", clients=clients, vehicles=vehicles, mechs=mechs, today=datetime.date.today().strftime("%Y-%m-%d"), title="Nova OS")
 
 @app.route("/os/<int:os_id>")
 def os_view(os_id):
@@ -1646,6 +1660,8 @@ def os_edit(os_id):
         notes = (request.form.get("notes") or "").strip()
         base_labor = float(request.form.get("labor") or 0)
 
+        os_date = (request.form.get("os_date") or "").strip() or (o["os_date"] or (o["created_at"][:10] if o["created_at"] else ""))
+
         mechanic_raw = request.form.get("mechanic_id")
         mechanic_id = int(mechanic_raw) if mechanic_raw else None
 
@@ -1763,6 +1779,7 @@ def os_edit(os_id):
             """
             UPDATE orders
                SET vehicle_id = ?,
+                   os_date = ?,
                    status = ?,
                    notes = ?,
                    labor = ?,
@@ -1771,7 +1788,7 @@ def os_edit(os_id):
                    pay_status = ?
              WHERE id = ?
             """,
-            (vehicle_id, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
+            (vehicle_id, os_date, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
         )
 
         # 5) Reinsere itens (peças e serviços extras)

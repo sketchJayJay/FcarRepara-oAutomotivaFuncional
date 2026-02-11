@@ -62,12 +62,17 @@
     </div>
 
     <!-- Veículo + mão de obra -->
+        <!-- Data da OS (editável) -->
     <div class="flex gap" style="margin-top: 10px">
       <div>
+        <label>Data da OS</label>
+        <input class="field" type="date" name="os_date" value="{{ o.os_date if o.os_date else (o.created_at[:10] if o.created_at else '') }}">
+      </div>
+      <div style="flex: 1">
         <label>Placa</label>
         <input class="field" name="vehicle_plate" value="{{ o.plate or '' }}">
       </div>
-      <div style="flex: 1">
+      <div style="flex: 2">
         <label>Modelo / descrição do veículo</label>
         <input class="field" name="vehicle_text" value="{{ o.model or '' }}">
       </div>
