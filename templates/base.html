@@ -9,6 +9,7 @@
 <link rel="icon" href="{{ url_for('static', filename='logo.png') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='utilities.css', v='20261110') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20261110') }}">
+{% block extra_head %}{% endblock %}
 <script defer src="{{ url_for('static', filename='app.js', v='20261110') }}"></script>
 </head>
 <body class="{{ 'signed-in' if username else 'public-view' }}">

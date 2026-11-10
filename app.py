@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import os, sqlite3, datetime, io, socket, csv, math, re, secrets, unicodedata
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 import qrcode
-from flask import Flask, g, render_template, request, redirect, url_for, flash, jsonify, send_file, session
+from flask import Flask, g, render_template, request, redirect, url_for, flash, jsonify, send_file, session, abort
 import functools
 
 
@@ -1288,59 +1288,114 @@ def os_new():
             return render_order_form(code=503)
     return render_order_form()
 
+
+def _os_document_data(os_id):
+    db = get_db()
+    row = db.execute("""
+        SELECT o.*, c.name AS client_name, c.phone AS client_phone,
+               v.plate, v.model, m.name AS mech
+        FROM orders o JOIN clients c ON c.id=o.client_id
+        LEFT JOIN vehicles v ON v.id=o.vehicle_id
+        LEFT JOIN mechanics m ON m.id=o.mechanic_id WHERE o.id=?
+    """, (os_id,)).fetchone()
+    if not row:
+        return None
+    order = dict(row)
+    items = [dict(item) for item in db.execute("""
+        SELECT i.*, inv.name AS inv_name FROM order_items i
+        LEFT JOIN inventory inv ON inv.id=i.inventory_id
+        WHERE i.order_id=? ORDER BY i.id
+    """, (os_id,)).fetchall()]
+    parts = [item for item in items if int(item.get('is_labor') or 0)==0]
+    services = [item for item in items if int(item.get('is_labor') or 0)==1]
+    parts_total = sum(float(item['total'] or 0) for item in parts)
+    extra_total = sum(float(item['total'] or 0) for item in services)
+    labor = float(order.get('labor') or 0)
+    return dict(o=order, its=items, pecas=parts, servicos_itens=services,
+        pecas_total=parts_total, servicos_itens_total=extra_total,
+        mao_obra=labor, servicos_total=labor+extra_total, total=parts_total+labor+extra_total)
+
+
+def _os_public_url(os_id):
+    configured = os.getenv('FCAR_PUBLIC_URL', '').strip()
+    parts = urlsplit(configured)
+    if parts.scheme in ('http','https') and parts.netloc:
+        return configured.rstrip('/') + url_for('os_view', os_id=os_id)
+    # Coolify termina o HTTPS no proxy; conserva o protocolo do acesso externo.
+    forwarded = request.headers.get('X-Forwarded-Proto', '').split(',')[0].strip()
+    scheme = forwarded if forwarded in ('http','https') else request.scheme
+    return url_for('os_view', os_id=os_id, _external=True, _scheme=scheme)
+
+
+def _os_pdf_filename(order):
+    plate = re.sub(r'[^A-Z0-9]', '', (order.get('plate') or '').upper())
+    return f"FCAR_OS_{int(order['id']):06d}" + (f"_{plate}" if plate else '') + '.pdf'
+
+
+def _os_whatsapp_phone(value):
+    raw = str(value or '').strip()
+    digits = ''.join(char for char in raw if char.isascii() and char.isdigit())
+    if raw.startswith('+'):
+        return digits if 8 <= len(digits) <= 15 else ''
+    if len(digits) in (10,11):
+        return '55' + digits
+    if len(digits) in (12,13) and digits.startswith('55'):
+        return digits
+    return ''
+
+
+def _os_whatsapp_text(data):
+    order = data['o']
+    name = ((order.get('client_name') or '').strip().split() or ['cliente'])[0]
+    vehicle = ' · '.join(value for value in [order.get('plate'),order.get('model')] if value)
+    return (f"Olá, {name}! Segue sua ordem de serviço *#{int(order['id']):06d}* "
+        f"da *FCAR Reparação Automotiva*.\n\n"
+        + (f"Veículo: {vehicle}\n" if vehicle else '')
+        + f"Total: *{fmt_money(data['total'])}*\n\n"
+        + "Confira os detalhes e salve o PDF pelo link:\n" + _os_public_url(order['id']))
+
+
+@app.route("/os/<int:os_id>/pdf")
+def os_pdf(os_id):
+    data = _os_document_data(os_id)
+    if not data:
+        abort(404)
+    from fcar_pdf import build_order_pdf
+    document = build_order_pdf(data, _os_public_url(os_id))
+    response = send_file(document, mimetype='application/pdf', as_attachment=True,
+        download_name=_os_pdf_filename(data['o']), max_age=0)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@app.route("/os/<int:os_id>/whatsapp")
+@login_required
+def os_whatsapp(os_id):
+    data = _os_document_data(os_id)
+    if not data:
+        abort(404)
+    phone = _os_whatsapp_phone(data['o'].get('client_phone'))
+    response = redirect('https://wa.me/' + phone + '?text=' + quote(_os_whatsapp_text(data), safe=''))
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
 @app.route("/os/<int:os_id>")
 def os_view(os_id):
-    db = get_db()
-    o = db.execute("""
-        SELECT o.*, c.name AS client_name, v.plate, v.model, m.name AS mech
-        FROM orders o
-        JOIN clients c ON c.id=o.client_id
-        LEFT JOIN vehicles v ON v.id=o.vehicle_id
-        LEFT JOIN mechanics m ON m.id=o.mechanic_id
-        WHERE o.id=?
-    """, (os_id,)).fetchone()
-    if not o:
+    data = _os_document_data(os_id)
+    if not data:
         flash("OS não encontrada.", "error")
         return redirect(url_for("os_list"))
-
-    its = db.execute("""
-        SELECT i.*, inv.name AS inv_name
-        FROM order_items i
-        LEFT JOIN inventory inv ON inv.id=i.inventory_id
-        WHERE i.order_id=?
-        ORDER BY i.id
-    """, (os_id,)).fetchall()
-    its = [dict(r) for r in its]  # garante .get() nos itens (sqlite3.Row -> dict)
-
-    pecas = [r for r in its if int(r.get("is_labor") or 0) == 0]
-    servicos_itens = [r for r in its if int(r.get("is_labor") or 0) == 1]
-
-    pecas_total = sum(float(r["total"] or 0) for r in pecas) if pecas else 0.0
-    servicos_itens_total = sum(float(r["total"] or 0) for r in servicos_itens) if servicos_itens else 0.0
-    mao_obra = float(o["labor"] or 0)
-    servicos_total = mao_obra + servicos_itens_total
-    total = pecas_total + servicos_total
-
-    return render_template(
-        "os_view.html",
-        o=o,
-        its=its,
-        pecas=pecas,
-        servicos_itens=servicos_itens,
-        pecas_total=pecas_total,
-        servicos_itens_total=servicos_itens_total,
-        mao_obra=mao_obra,
-        servicos_total=servicos_total,
-        total=total,
-        title=f"OS #{os_id}",
-        auto_print=('print' in request.args),
-    )
+    return render_template("os_view.html", **data, public_url=_os_public_url(os_id),
+        pdf_filename=_os_pdf_filename(data['o']),
+        title=f"OS #{os_id}", auto_print=('print' in request.args))
 
 @app.route("/os/<int:os_id>/qr")
 
 def qr_os(os_id):
     """Gera QR Code da OS."""
-    url = url_for("os_view", os_id=os_id, _external=True)
+    url = _os_public_url(os_id)
     img = qrcode.make(url)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -2780,7 +2835,7 @@ def qr_generic():
 
 @app.route("/qr/os/<int:os_id>")
 def qr_os_alt(os_id):
-    url = url_for("os_view", os_id=os_id, _external=True)
+    url = _os_public_url(os_id)
     return _qr_image(url)
 
 

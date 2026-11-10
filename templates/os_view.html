@@ -1,160 +1,29 @@
 {% extends "base.html" %}
+{% from '_ui.html' import icon %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static',filename='order-document.css',v='20261110-os2') }}">{% endblock %}
 {% block body %}
-<div class="wm-print-only">
-  <img src="/static/logo.png" alt="FCAR" style="width:420px;filter:drop-shadow(0 8px 30px rgba(0,0,0,.25));" />
-</div>
-
-<div class="flex items-center gap-3 mb-4">
-  <img src="/static/logo.png" alt="FCAR Reparação Automotiva" style="height:64px;width:auto;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.25);" />
-  <div>
-    <div class="text-xl font-bold">FCAR Reparação Automotiva</div>
-    <div class="muted text-sm">Ordem de Serviço</div>
-  </div>
-</div>
-
-<div class="flex items-center justify-between mb-3">
-  <h1 class="text-xl font-semibold headline">OS #{{ o['id'] }} — {{ o['client_name'] }}</h1>
-  <div class="noprint flex items-center gap-2">
-    <button id="btnQR" class="btn alt" type="button">QR</button>
-    {% if username and o['fin_tx_id'] %}
-      <a class="btn alt" href="{{ url_for('financeiro_ver', tx_id=o['fin_tx_id']) }}">Financeiro</a>
-    {% endif %}
-    {% if username %}
-      <a class="btn" href="{{ url_for('os_edit', os_id=o['id']) }}">Editar</a>
-      <form method="post" action="{{ url_for('os_delete', os_id=o['id']) }}" class="js-delete-form inline" data-osid="{{ o['id'] }}" data-msg="Excluir OS #{{ o['id'] }}?">
-        <button class="btn danger">Excluir</button>
-      </form>
-    {% endif %}
-    <button class="btn alt" onclick="window.print()">Imprimir</button>
-    {% if username %}
-      <a class="btn" href="{{ url_for('os_list') }}">Voltar</a>
-    {% endif %}
-  </div>
-</div>
-
-<div class="glass p-4">
-  <div class="grid md:grid-cols-4 gap-2 text-sm">
-    <div><span class="muted">Data:</span> {{ (o['os_date'] or o['created_at'])|datebr }}</div>
-    <div><span class="muted">Veículo:</span> {{ o['plate'] or '-' }} {{ o['model'] or '' }}</div>
-    <div><span class="muted">Mecânico:</span> {{ o['mech'] or '-' }}</div>
-    <div><span class="muted">Status:</span> {{ o['status'] }}</div>
-    <div><span class="muted">Pagamento:</span> {{ o['pay_method'] or '-' }} / {{ o['pay_status'] or '-' }}</div>
-  </div>
-  <div class="mt-3"><span class="muted">Observações:</span> {{ o['notes'] or '-' }}</div>
-</div>
-
-<div class="glass p-4 mt-3">
-  <h2 class="font-semibold mb-2">Resumo automático</h2>
-  <div class="grid md:grid-cols-5 gap-2 text-sm">
-    <div><span class="muted">Peças (saída):</span> {{ pecas_total|money }}</div>
-    <div><span class="muted">Mão de obra:</span> {{ mao_obra|money }}</div>
-    <div><span class="muted">Serviços extras:</span> {{ servicos_itens_total|money }}</div>
-    <div><span class="muted">Total serviços (entrada):</span> {{ servicos_total|money }}</div>
-    <div><span class="muted">Total geral (entrada):</span> <b>{{ total|money }}</b></div>
-  </div>
-  {% if username and o['fin_tx_id'] %}
-    <div class="mt-2 text-sm muted">
-      Dica: este resumo já está detalhado no Financeiro (botão “Financeiro” acima).
-    </div>
-  {% endif %}
-</div>
-
-<div class="glass p-4 mt-3">
-  <h2 class="font-semibold mb-2">Detalhamento</h2>
-
-  <div class="grid md:grid-cols-2 gap-3">
-    <div>
-      <div class="font-semibold mb-2">Peças utilizadas (saída do estoque)</div>
-      <table class="text-sm">
-        <thead><tr><th>Peça</th><th>Qtd</th><th>Unit</th><th>Total</th></tr></thead>
-        <tbody>
-          {% for it in pecas %}
-          <tr>
-            <td>{{ it['description'] }}</td>
-            <td>{{ '%.2f'|format(it['qty']) }}</td>
-            <td>{{ it['unit_price']|money }}</td>
-            <td>{{ it['total']|money }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="muted">Nenhuma peça registrada.</td></tr>
-          {% endfor %}
-          <tr>
-            <td colspan="3" class="text-right font-semibold">Subtotal peças</td>
-            <td class="font-semibold">{{ pecas_total|money }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div>
-      <div class="font-semibold mb-2">Serviços (entrada)</div>
-      <table class="text-sm">
-        <thead><tr><th>Serviço</th><th>Qtd</th><th>Unit</th><th>Total</th></tr></thead>
-        <tbody>
-          <tr>
-            <td>Mão de obra</td>
-            <td>1</td>
-            <td>{{ mao_obra|money }}</td>
-            <td>{{ mao_obra|money }}</td>
-          </tr>
-          {% for it in servicos_itens %}
-          <tr>
-            <td>{{ it['description'] }}</td>
-            <td>{{ '%.2f'|format(it['qty']) }}</td>
-            <td>{{ it['unit_price']|money }}</td>
-            <td>{{ it['total']|money }}</td>
-          </tr>
-          {% endfor %}
-          <tr>
-            <td colspan="3" class="text-right font-semibold">Subtotal serviços</td>
-            <td class="font-semibold">{{ servicos_total|money }}</td>
-          </tr>
-        </tbody>
-      </table>
-      {% if (mao_obra|float) == 0 and (servicos_itens|length) == 0 %}
-        <div class="muted text-sm mt-2">Nenhum serviço registrado.</div>
-      {% endif %}
-    </div>
-  </div>
-
-  <div class="mt-3 text-right text-lg font-bold">
-    Total geral: {{ total|money }}
-  </div>
-</div>
-
-{% if auto_print %}
-<script>
-  // Abre diálogo de impressão automaticamente ao carregar
-  window.addEventListener('load', function(){ setTimeout(()=>window.print(), 300); });
-</script>
-{% endif %}
-
-<!-- Modal QR da OS -->
-<div id="qrModal" class="fixed inset-0 z-50 hidden items-center justify-center noprint">
-  <div class="absolute inset-0 bg-black/70"></div>
-  <div class="relative glass p-5 w-[92%] max-w-md">
-    <h3 class="text-lg font-semibold mb-2">QR da OS #{{ o['id'] }}</h3>
-    <div class="flex items-center justify-center">
-      <img src="{{ url_for('qr_os', os_id=o['id']) }}" alt="QR OS" class="bg-white p-3 rounded-xl" style="width:240px;height:240px;" />
-    </div>
-    <div class="mt-3 font-mono text-sm break-all">{{ url_for('os_view', os_id=o['id'], _external=True) }}</div>
-    <div class="flex justify-end gap-2 mt-4">
-      <button id="btnCloseQR" class="btn alt">Fechar</button>
-      <a class="btn" target="_blank" href="{{ url_for('os_view', os_id=o['id']) }}?print=1">Imprimir</a>
-    </div>
-  </div>
-</div>
-<script>
-  (function(){
-    const m = document.getElementById('qrModal');
-    const open = document.getElementById('btnQR');
-    const close = document.getElementById('btnCloseQR');
-    function show(){ m.classList.remove('hidden'); m.classList.add('flex'); }
-    function hide(){ m.classList.add('hidden'); m.classList.remove('flex'); }
-    open?.addEventListener('click', show);
-    close?.addEventListener('click', hide);
-    m?.addEventListener('click', (e)=>{ if(e.target===m) hide(); });
-  })();
-</script>
-
+{% set number = '%06d'|format(o.id) %}
+{% set pay_label = {'Pendente':'A receber','Efetivado':'Recebido','Pago':'Recebido','Recebido':'Recebido','Cancelado':'Cancelado'}.get(o.pay_status,o.pay_status or 'A receber') %}
+<div class="page-heading os-heading noprint"><div><p class="eyebrow">ATENDIMENTOS / ORDEM DE SERVIÇO</p><h1>OS #{{ number }}</h1><p class="muted">{{ o.client_name }}{% if o.plate %} · {{ o.plate }}{% endif %}</p></div>
+<div class="os-actions"><a class="btn" id="save-order-pdf" href="{{ url_for('os_pdf',os_id=o.id) }}" download="{{ pdf_filename }}">{{ icon('download') }} Salvar PDF</a>
+{% if username %}<a class="btn os-whatsapp" id="share-order-whatsapp" href="{{ url_for('os_whatsapp',os_id=o.id) }}" target="_blank" rel="noopener" data-pdf-url="{{ url_for('os_pdf',os_id=o.id) }}" data-filename="{{ pdf_filename }}" data-title="FCAR · OS #{{ number }}" data-message="Olá! Segue a ordem de serviço #{{ number }} da FCAR Reparação Automotiva.">{{ icon('chat') }} Enviar no WhatsApp</a>{% endif %}
+<details class="export-menu os-action-menu"><summary class="btn alt">Mais opções</summary><div><a href="{{ url_for('os_view',os_id=o.id,print=1) }}" target="_blank" rel="noopener">Imprimir a OS</a><button type="button" data-os-qr-open>Mostrar QR Code</button>{% if username %}<a href="{{ url_for('os_edit',os_id=o.id) }}">Editar atendimento</a>{% if o.fin_tx_id %}<a href="{{ url_for('financeiro_ver',tx_id=o.fin_tx_id) }}">Abrir financeiro</a>{% endif %}<form method="post" action="{{ url_for('os_delete',os_id=o.id) }}" class="js-delete-form" data-msg="Excluir a OS #{{ o.id }}? O estoque será estornado e o lançamento financeiro, cancelado."><button type="submit">Excluir OS</button></form>{% endif %}</div></details></div></div>
+{% if username %}<p class="os-share-help noprint" id="os-share-help" aria-live="polite">O WhatsApp abrirá com a mensagem e o link da OS. Para anexar o arquivo manualmente, use Salvar PDF.</p>{% endif %}
+<article class="os-paper" aria-label="Ordem de serviço {{ number }}">
+<header class="os-paper-header"><div class="os-paper-brand"><img src="{{ url_for('static',filename='logo.png') }}" alt="FCAR Reparação Automotiva"><p>Cuidado em cada atendimento</p></div><div class="os-paper-ident"><span>ORDEM DE SERVIÇO</span><strong>#{{ number }}</strong><p>{{ (o.os_date or o.created_at)|datebr }}</p><div class="os-document-state {{ {'Aberta':'open','Em andamento':'progress','Fechada':'closed','Cancelada':'cancelled'}.get(o.status,'') }}">{{ o.status or 'Aberta' }}</div></div></header>
+<div class="os-paper-body">
+<div class="os-identity"><section><span class="os-label">Cliente</span><h2>{{ o.client_name }}</h2>{% if username and o.client_phone %}<span class="os-contact">{{ o.client_phone }}</span>{% endif %}</section><section><span class="os-label">Veículo</span><h2 class="os-model">{{ o.model or 'Veículo não informado' }}</h2><p>Atendimento em {{ (o.os_date or o.created_at)|datebr }}</p></section></div>
+<div class="os-reference-grid"><div><span class="os-label">Placa</span><strong class="os-plate">{{ o.plate or 'Não informada' }}</strong></div><div><span class="os-label">Responsável</span><strong>{{ o.mech or 'Não definido' }}</strong></div><div><span class="os-label">Pagamento</span><strong>{{ pay_label }}</strong><small>{{ o.pay_method or 'Forma não informada' }}</small></div></div>
+{% if pecas %}<section class="os-section"><div class="os-section-heading"><h3>Peças e materiais</h3><span>{{ pecas|length }} {{ 'item' if pecas|length==1 else 'itens' }}</span></div><div class="table-wrap os-table-wrap"><table class="os-table"><thead><tr><th>Descrição</th><th>Qtd.</th><th>Valor unitário</th><th>Total</th></tr></thead><tbody>{% for item in pecas %}<tr><td data-label="Descrição">{{ item.description }}</td><td data-label="Qtd.">{{ '%g'|format(item.qty)|replace('.',',') }}</td><td data-label="Unitário">{{ item.unit_price|money }}</td><td data-label="Total">{{ item.total|money }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% if mao_obra or servicos_itens %}<section class="os-section"><div class="os-section-heading"><h3>Mão de obra e serviços</h3><span>{{ (servicos_itens|length)+(1 if mao_obra else 0) }} {{ 'serviço' if (servicos_itens|length)+(1 if mao_obra else 0)==1 else 'serviços' }}</span></div><div class="table-wrap os-table-wrap"><table class="os-table"><thead><tr><th>Descrição</th><th>Qtd.</th><th>Valor unitário</th><th>Total</th></tr></thead><tbody>{% if mao_obra %}<tr><td data-label="Descrição">Mão de obra adicional</td><td data-label="Qtd.">1</td><td data-label="Unitário">{{ mao_obra|money }}</td><td data-label="Total">{{ mao_obra|money }}</td></tr>{% endif %}{% for item in servicos_itens %}<tr><td data-label="Descrição">{{ item.description }}</td><td data-label="Qtd.">{{ '%g'|format(item.qty)|replace('.',',') }}</td><td data-label="Unitário">{{ item.unit_price|money }}</td><td data-label="Total">{{ item.total|money }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% if not pecas and not mao_obra and not servicos_itens %}<p class="os-blank">Atendimento sem itens detalhados.</p>{% endif %}
+<div class="os-totals"><div><span>Peças e materiais</span><strong>{{ pecas_total|money }}</strong></div><div><span>Mão de obra e serviços</span><strong>{{ servicos_total|money }}</strong></div><div class="os-total-grand"><span>TOTAL DA OS</span><strong>{{ total|money }}</strong></div></div>
+{% if o.notes %}<section class="os-notes"><h3>Observações do atendimento</h3><p>{{ o.notes }}</p></section>{% endif %}
+<div class="os-acknowledgement"><div class="os-signature"><strong>{{ o.mech or 'Responsável pelo atendimento' }}</strong><span>Responsável pelo atendimento</span></div><div class="os-signature"><strong>{{ o.client_name }}</strong><span>Cliente</span></div></div>
+<footer class="os-document-footer"><div><strong>Acompanhe sua ordem de serviço</strong><p>Aponte a câmera para o QR Code ou acesse o link para consultar a OS e salvar o PDF.</p><a href="{{ public_url }}">{{ public_url }}</a></div><img src="{{ url_for('qr_os',os_id=o.id) }}" alt="QR Code para consultar a OS"></footer>
+</div></article>
+{% if username %}<a class="os-back noprint" href="{{ url_for('os_list') }}">← Voltar para as ordens de serviço</a>{% endif %}
+<dialog id="os-qr-dialog" class="confirm-dialog os-dialog-qr noprint" aria-labelledby="os-qr-title"><h2 id="os-qr-title">OS #{{ number }}</h2><img src="{{ url_for('qr_os',os_id=o.id) }}" alt="QR Code da ordem de serviço"><a href="{{ public_url }}" target="_blank" rel="noopener">{{ public_url }}</a><div class="actions"><button type="button" class="btn alt" data-os-qr-close>Fechar</button><a class="btn" href="{{ url_for('os_pdf',os_id=o.id) }}">Salvar PDF</a></div></dialog>
+<script defer src="{{ url_for('static',filename='order-document.js',v='20261110-os2') }}"></script>
+{% if auto_print %}<script>window.addEventListener('load',()=>window.print());</script>{% endif %}
 {% endblock %}

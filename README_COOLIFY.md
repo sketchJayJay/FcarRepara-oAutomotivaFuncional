@@ -46,6 +46,32 @@ e também considera as informações em WAL. A variável antiga FORCE_SEED não 
 - Estilos e gráficos locais, sem depender de CDNs para carregar as telas.
   O sistema online continua precisando de conexão com o servidor.
 
+## OS moderna, PDF e WhatsApp
+
+A visualização e a impressão da OS usam um documento com cabeçalho FCAR,
+identificação do cliente e veículo, tabelas de peças e serviços, total,
+observações, assinaturas e QR Code.
+
+- **Salvar PDF** baixa o arquivo A4 gerado pelo servidor, com fontes incorporadas.
+  OS maiores continuam nas páginas seguintes, com cabeçalho e numeração.
+- **Enviar no WhatsApp** abre uma mensagem pronta para o telefone cadastrado,
+  com o total e o link da OS. Se não houver telefone válido, o WhatsApp permite
+  escolher o contato.
+- Em celulares e navegadores que permitem compartilhar arquivos, o PDF é
+  preparado e o botão abre o menu de compartilhamento. Escolha o WhatsApp e
+  o contato, depois confirme o envio.
+- No computador, é possível baixar o PDF e anexá-lo à conversa.
+- O cliente pode consultar a OS pelo link e baixar o PDF.
+- A opção **Mais opções** reúne impressão, QR Code, edição e financeiro.
+
+O Dockerfile instala a dependência ReportLab ao reconstruir a aplicação.
+As fontes e licenças estão em static/fonts; nenhum download de fonte é necessário.
+Para instalações locais, execute novamente a instalação de requirements.txt.
+
+Se a aplicação usar um domínio externo diferente do domínio recebido pelo proxy,
+FCAR_PUBLIC_URL pode definir a URL pública (por exemplo, https://oficina.exemplo).
+O padrão utiliza o endereço da requisição e conserva o HTTPS informado pelo Coolify.
+
 ## Validação
 
     python -m pip install -r requirements.txt

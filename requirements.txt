@@ -1,3 +1,4 @@
 Flask
 gunicorn
 qrcode[pil]
+reportlab>=4.0,<5
