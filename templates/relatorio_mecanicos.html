@@ -68,7 +68,7 @@
   <div class="rounded-2xl bg-black/40 border border-zinc-800 mb-6 overflow-hidden">
     <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between text-sm">
       <span class="font-semibold">Resumo por Mecânico</span>
-      <span class="text-xs text-gray-400">Repasse: {{ summary.repasse_percent }}% sobre o total</span>
+      <span class="text-xs text-gray-400">Repasse: {{ summary.repasse_percent }}% sobre a mão de obra</span>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full text-xs md:text-sm">
@@ -175,7 +175,7 @@
 </div>
 
 <!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static',filename='vendor/chart.umd.js') }}"></script>
 <script>
   const mechLabels = {{ rows | map(attribute='mechanic') | list | tojson }};
   const dataMaoObra = {{ rows | map(attribute='soma_mao_obra') | list | tojson }};

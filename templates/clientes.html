@@ -1,57 +1,7 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}{% from '_ui.html' import icon %}
 {% block body %}
-<div class="flex items-center justify-between mb-3">
-  <h1 class="text-xl font-semibold headline">Clientes</h1>
-  <form method="get" class="flex items-center gap-2">
-    <input class="field" type="text" name="q" placeholder="Buscar por nome/telefone/CPF" value="{{ q or '' }}">
-    <button class="btn">Buscar</button>
-  </form>
-  <div class="flex gap-2">
-    <a class="btn alt" href="{{ url_for('export_clientes_csv') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">Exportar CSV</a>
-    <a class="btn alt" target="_blank" href="{{ url_for('print_clientes') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">Imprimir/PDF</a>
-  </div>
-</div>
-
-<div class="grid md:grid-cols-3 gap-4">
-  <div class="glass p-4">
-    <h2 class="font-semibold mb-2">Novo Cliente</h2>
-    <form method="post" class="space-y-2">
-      <input class="field" name="name" placeholder="Nome completo" required>
-      <input class="field" name="phone" placeholder="Telefone">
-      <input class="field" name="cpf" placeholder="CPF">
-      <input class="field" name="address" placeholder="Endereço">
-      <button class="btn w-full">Salvar</button>
-    </form>
-  </div>
-
-  <div class="glass p-4 md:col-span-2">
-    <table class="text-sm w-full">
-      <thead>
-        <tr>
-          <th class="text-left">Nome</th>
-          <th class="text-left">Telefone</th>
-          <th class="text-left">CPF</th>
-          <th class="text-right">Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td>{{ r['name'] }}</td>
-          <td>{{ r['phone'] or '-' }}</td>
-          <td>{{ r['cpf'] or '-' }}</td>
-          <td class="text-right">
-            <a class="btn alt" href="{{ url_for('veiculos', client_id=r['id']) }}">Abrir painel</a>
-            <a class="btn" href="{{ url_for('cliente_edit', cid=r['id']) }}">Editar</a>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="4" class="muted">Sem clientes.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+<div class="page-heading"><div><p class="eyebrow">RELACIONAMENTO</p><h1>Clientes e veículos</h1><p class="muted">Cadastros, histórico e atendimentos em um só lugar.</p></div><div class="actions"><a class="btn alt" href="{{ url_for('export_clientes_csv',q=q) }}">{{ icon('download') }} Exportar CSV</a><a class="btn" href="#novo" data-open-create>{{ icon('plus') }} Novo cliente</a></div></div>
+<details class="panel create-details" id="novo"><summary>{{ icon('users') }} Cadastrar cliente</summary><form method="post" class="form-grid"><label class="span-2">Nome completo<input class="field" name="name" required autocomplete="name" placeholder="Como o cliente se chama?"></label><label>Telefone / WhatsApp<input class="field" name="phone" type="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label><label>CPF / documento<input class="field" name="cpf" placeholder="Documento do cliente"></label><label class="span-2">Endereço<input class="field" name="address" autocomplete="street-address" placeholder="Rua, número e bairro"></label><div class="form-actions"><button class="btn">{{ icon('check') }} Salvar cliente</button></div></form></details>
+<section class="panel"><form method="get" class="filter-form"><div class="search-row"><div class="search-field">{{ icon('search') }}<input type="search" name="q" value="{{ q }}" placeholder="Nome, telefone, documento ou placa" aria-label="Buscar cliente"></div><button class="btn">Buscar</button>{% if q %}<a class="btn alt" href="{{ url_for('clientes') }}">Limpar</a>{% endif %}</div></form><div class="list-summary"><strong>{{ pagination.count }} clientes encontrados</strong><span>Abra o painel para ver veículos e histórico</span></div><div class="table-wrap"><table class="responsive-table"><thead><tr><th>Cliente</th><th>Telefone</th><th>Documento</th><th>Ações</th></tr></thead><tbody>{% for r in rows %}<tr><td class="cell-primary" data-label="Cliente"><a class="client-name" href="{{ url_for('veiculos',client_id=r.id) }}"><strong>{{ r.name }}</strong></a><small>{{ r.address or 'Endereço não informado' }}</small></td><td data-label="Telefone">{{ r.phone or 'Não informado' }}</td><td data-label="Documento">{{ r.cpf or 'Não informado' }}</td><td class="cell-actions"><div class="actions"><a class="btn alt small" href="{{ url_for('veiculos',client_id=r.id) }}">Abrir painel</a><a class="text-link" href="{{ url_for('cliente_edit',cid=r.id) }}">Editar</a><a class="text-link" href="{{ url_for('os_new',client_id=r.id) }}">+ Nova OS</a></div></td></tr>{% else %}<tr><td colspan="4"><div class="empty-state">{{ icon('users') }}<h3>{{ 'Nenhum cliente encontrado' if q else 'Seu primeiro cliente começa aqui' }}</h3><p>{{ 'Tente outro nome, telefone ou placa.' if q else 'Abra o cadastro acima para adicionar um cliente.' }}</p></div></td></tr>{% endfor %}</tbody></table></div>{% include '_pagination.html' %}</section>
+<script>document.querySelector('[data-open-create]')?.addEventListener('click',()=>{document.querySelector('.create-details').open=true;});</script>
 {% endblock %}

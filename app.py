@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import os, sqlite3, datetime, io, socket, csv
+import os, sqlite3, datetime, io, socket, csv, math, re, secrets, unicodedata
+from urllib.parse import urlsplit
 import qrcode
 from flask import Flask, g, render_template, request, redirect, url_for, flash, jsonify, send_file, session
 import functools
@@ -14,7 +15,48 @@ APP_TITLE = "FCAR Reparação Automotiva"
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "oficina.db")
 DB_PATH = os.getenv("FCAR_DB_PATH") or os.getenv("DB_PATH") or DEFAULT_DB_PATH
 app = Flask(__name__)
-app.secret_key = "dev-2cp-mec"
+def _session_key():
+    configured = os.getenv("SECRET_KEY")
+    if configured:
+        return configured
+    # Conserva a sessão entre reinícios sem uma chave fixa compartilhada.
+    key_path = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), ".fcar-session-key")
+    os.makedirs(os.path.dirname(key_path), exist_ok=True)
+    try:
+        with open(key_path, "x") as key_file:
+            os.chmod(key_path, 0o600)
+            key_file.write(secrets.token_hex(32))
+    except FileExistsError:
+        pass
+    with open(key_path) as key_file:
+        return key_file.read().strip()
+
+app.secret_key = _session_key()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+def search_key(value):
+    text = unicodedata.normalize("NFKD", str(value or "").casefold())
+    return "".join(c for c in text if c.isalnum() and not unicodedata.combining(c))
+
+def safe_next(value, fallback):
+    parts = urlsplit(value or "")
+    if value and value.startswith("/") and not value.startswith("//") and not parts.netloc and not parts.scheme and "\\" not in value:
+        return value
+    return fallback
+
+def page_url(page):
+    args = request.args.to_dict()
+    args["page"] = page
+    return url_for(request.endpoint, **args)
+
+def date_br(value):
+    try:
+        return datetime.date.fromisoformat(str(value)[:10]).strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return "—"
+
+app.jinja_env.filters["datebr"] = date_br
+app.jinja_env.globals["page_url"] = page_url
 
 def get_db():
     db = getattr(g, "_db", None)
@@ -26,8 +68,9 @@ def get_db():
                 os.makedirs(d, exist_ok=True)
         except Exception:
             pass
-        db = g._db = sqlite3.connect(DB_PATH)
+        db = g._db = sqlite3.connect(DB_PATH, timeout=30)
         db.row_factory = sqlite3.Row
+        db.create_function("search_key", 1, search_key, deterministic=True)
     return db
 
 @app.teardown_appcontext
@@ -323,6 +366,134 @@ def fmt_money(v):
 app.jinja_env.filters["money"] = fmt_money
 
 
+
+ORDER_STATUSES = ('Aberta', 'Em andamento', 'Fechada', 'Cancelada')
+
+def bounded_int(value, default, minimum, maximum):
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+def pagination_for(count):
+    per_page = 25
+    pages = max(1, math.ceil(count / per_page))
+    page = bounded_int(request.args.get('page'), 1, 1, pages)
+    return dict(page=page, pages=pages, count=count, per_page=per_page, offset=(page-1)*per_page)
+
+def form_number(value, label, positive=False):
+    try:
+        number = float(str(value or 0).replace(',', '.'))
+    except (TypeError, ValueError):
+        raise ValueError(f'{label}: informe um número válido.')
+    if not math.isfinite(number) or number < 0 or number > 1e12 or (positive and number == 0):
+        raise ValueError(f'{label}: informe um valor {"maior que zero" if positive else "igual ou maior que zero"}.')
+    return number
+
+def inventory_values():
+    name = request.form.get('name', '').strip()
+    if not name:
+        raise ValueError('Preencha o nome da peça ou serviço.')
+    numbers = [form_number(request.form.get(key), label) for key, label in [
+        ('stock','Estoque'), ('min_stock','Estoque mínimo'), ('price','Preço'),
+        ('cost_price','Custo'), ('repasse_value','Repasse')]]
+    return (name, request.form.get('sku','').strip().upper() or None, numbers[0], numbers[1], numbers[2],
+            int('1' in request.form.getlist('is_labor')), numbers[3], numbers[4])
+
+def submitted_order_items():
+    indices = sorted({int(m.group(1)) for key in request.form for m in [re.fullmatch(r'item_desc_(\d+)', key)] if m})
+    return [dict(description=request.form.get(f'item_desc_{i}','').strip(),
+        inventory_id=request.form.get(f'item_inv_{i}') or None,
+        qty=request.form.get(f'item_qty_{i}') or '1',
+        unit_price=request.form.get(f'item_price_{i}') or '0',
+        is_labor=int(request.form.get(f'item_is_labor_{i}') == '1')) for i in indices]
+
+def render_order_form(order=None, code=200):
+    db = get_db()
+    form = dict(order) if order else dict(os_date=_today_iso(), labor=0, status='Aberta', pay_method='Dinheiro', pay_status='Pendente', client_id=request.args.get('client_id',''))
+    if order:
+        form.update(vehicle_plate=order['plate'] or '', vehicle_text=order['model'] or '')
+    if request.method == 'POST':
+        form.update(request.form.to_dict())
+        items = submitted_order_items()
+    else:
+        items = [dict(r) for r in db.execute('SELECT oi.*,COALESCE(inv.is_labor,0) AS catalog_is_labor FROM order_items oi LEFT JOIN inventory inv ON inv.id=oi.inventory_id WHERE oi.order_id=? ORDER BY oi.id', (order['id'],)).fetchall()] if order else []
+    client_id = form.get('client_id')
+    client = db.execute('SELECT id,name FROM clients WHERE id=?', (client_id,)).fetchone() if client_id else None
+    return render_template('os_form.html', order=order, form=form, items=items, selected_client=client,
+        mechs=db.execute('SELECT * FROM mechanics ORDER BY name').fetchall(), statuses=ORDER_STATUSES,
+        title=f"Editar OS #{order['id']}" if order else 'Nova ordem de serviço'), code
+
+def save_order(existing=None):
+    db = get_db()
+    # A transação cobre veículo, OS, estoque e financeiro; qualquer falha desfaz tudo.
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            client_id = int(existing['client_id'] if existing else request.form.get('client_id') or 0)
+            mechanic_id = int(request.form.get('mechanic_id') or 0) or None
+            vehicle_id = existing['vehicle_id'] if existing else int(request.form.get('vehicle_id') or 0) or None
+        except (ValueError, TypeError):
+            raise ValueError('Selecione um cliente, veículo e mecânico válidos.')
+        client = db.execute('SELECT id,name FROM clients WHERE id=?', (client_id,)).fetchone()
+        if not client: raise ValueError('Selecione um cliente cadastrado antes de salvar.')
+        if mechanic_id and not db.execute('SELECT id FROM mechanics WHERE id=?', (mechanic_id,)).fetchone():
+            raise ValueError('O mecânico selecionado não foi encontrado.')
+        if vehicle_id and not db.execute('SELECT id FROM vehicles WHERE id=? AND client_id=?', (vehicle_id, client_id)).fetchone():
+            raise ValueError('O veículo selecionado não pertence a este cliente.')
+        os_date = request.form.get('os_date') or (existing['os_date'] if existing else _today_iso())
+        try: datetime.date.fromisoformat(os_date)
+        except (TypeError, ValueError): raise ValueError('Preencha uma data válida para a OS.')
+        status = request.form.get('status') or (existing['status'] if existing else 'Aberta')
+        if status not in ORDER_STATUSES: raise ValueError('Selecione um status válido para a OS.')
+        pay_method = request.form.get('pay_method') or 'Dinheiro'
+        pay_status = request.form.get('pay_status') or 'Pendente'
+        if pay_status not in ('Pendente','Efetivado','Cancelado','Pago','Recebido'):
+            raise ValueError('Selecione um status de pagamento válido.')
+        base_labor = form_number(request.form.get('labor'), 'Mão de obra')
+        items = []
+        raw_items = submitted_order_items()
+        if len(raw_items) > 100: raise ValueError('Use até 100 itens por OS.')
+        for raw in raw_items:
+            if not raw['description']: continue
+            qty = form_number(raw['qty'], 'Quantidade', positive=True)
+            unit = form_number(raw['unit_price'], 'Valor unitário')
+            try: inv_id = int(raw['inventory_id']) if raw['inventory_id'] else None
+            except (TypeError, ValueError): raise ValueError('Selecione um item válido do estoque.')
+            inv = db.execute('SELECT is_labor FROM inventory WHERE id=?', (inv_id,)).fetchone() if inv_id else None
+            if inv_id and not inv: raise ValueError('Um item do estoque não foi encontrado. Selecione novamente.')
+            is_labor = int(raw['is_labor'] or (inv and inv['is_labor']) or 0)
+            total = round(qty * unit, 2)
+            if total > 1e12: raise ValueError('O total de um item excedeu o limite permitido.')
+            items.append(dict(description=raw['description'], inventory_id=inv_id, qty=qty,
+                unit_price=unit, total=total, is_labor=is_labor))
+        plate = request.form.get('vehicle_plate','').strip().upper()
+        model = request.form.get('vehicle_text','').strip()
+        if plate or model:
+            if not vehicle_id and plate:
+                v = db.execute('SELECT id FROM vehicles WHERE client_id=? AND search_key(plate)=? LIMIT 1', (client_id, search_key(plate))).fetchone()
+                if v: vehicle_id = v['id']
+            if vehicle_id:
+                db.execute('UPDATE vehicles SET plate=?,model=? WHERE id=?', (plate or None, model or None, vehicle_id))
+            else:
+                vehicle_id = db.execute('INSERT INTO vehicles(client_id,plate,model) VALUES (?,?,?)', (client_id, plate or None, model or None)).lastrowid
+        values = (client_id, vehicle_id, os_date, status, request.form.get('notes','').strip(), base_labor, mechanic_id, pay_method, pay_status)
+        if existing:
+            os_id = existing['id']
+            db.execute('UPDATE orders SET client_id=?,vehicle_id=?,os_date=?,status=?,notes=?,labor=?,mechanic_id=?,pay_method=?,pay_status=? WHERE id=?', values + (os_id,))
+        else:
+            os_id = db.execute('INSERT INTO orders(client_id,vehicle_id,os_date,status,notes,labor,mechanic_id,pay_method,pay_status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)', values + (_now_iso(),)).lastrowid
+        ok, shortages = reconcile_os_stock(db, os_id, status, items)
+        if not ok:
+            detail = '; '.join(f"{s['name']}: disponível {s['have']:g}, necessário +{s['need']:g}" for s in shortages)
+            raise ValueError('Estoque insuficiente para fechar a OS. ' + detail)
+        db.execute('DELETE FROM order_items WHERE order_id=?', (os_id,))
+        db.executemany('INSERT INTO order_items(order_id,inventory_id,description,qty,unit_price,total,is_labor) VALUES (?,?,?,?,?,?,?)',
+            [(os_id,it['inventory_id'],it['description'],it['qty'],it['unit_price'],it['total'],it['is_labor']) for it in items])
+        sync_os_to_finance(db, os_id, client['name'], status, pay_method, pay_status, base_labor, items)
+    return os_id
+
+
 def login_required(view):
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
@@ -347,11 +518,12 @@ def login():
         if not user or user["password"] != password:
             error = "Usuário ou senha inválidos."
         else:
+            session.clear()
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             flash("Login realizado com sucesso!", "ok")
             next_page = request.args.get("next")
-            return redirect(next_page or url_for("index"))
+            return redirect(safe_next(next_page, url_for("index")))
     return render_template("login.html", error=error, title="Login")
 
 
@@ -362,81 +534,73 @@ def logout():
     return redirect(url_for("login"))
 
 
-@login_required
-@login_required
 @app.route("/")
+@login_required
 def index():
     db = get_db()
-    low = db.execute("SELECT * FROM inventory WHERE stock <= min_stock ORDER BY stock ASC").fetchall()
+    today = _today_iso()
+    low_where = "COALESCE(is_labor,0)=0 AND stock <= min_stock"
+    low = db.execute(f"SELECT * FROM inventory WHERE {low_where} ORDER BY stock, name LIMIT 6").fetchall()
+    stats = dict(db.execute("""
+        SELECT COUNT(*) AS total_os,
+               SUM(CASE WHEN status IN ('Aberta','Em andamento') THEN 1 ELSE 0 END) AS open_os,
+               SUM(CASE WHEN status='Em andamento' THEN 1 ELSE 0 END) AS in_progress,
+               SUM(CASE WHEN status='Fechada' AND COALESCE(NULLIF(os_date,''),substr(created_at,1,10))=? THEN 1 ELSE 0 END) AS closed_today
+        FROM orders
+    """, (today,)).fetchone())
+    stats['low_stock'] = db.execute(f"SELECT COUNT(*) FROM inventory WHERE {low_where}").fetchone()[0]
+    stats['receivable'] = db.execute("SELECT COALESCE(SUM(amount),0) FROM fin_transactions WHERE ttype='IN' AND status='PENDENTE'").fetchone()[0]
+    dates = db.execute("SELECT MIN(date),MAX(date) FROM fin_transactions WHERE ttype='IN' AND status='PENDENTE'").fetchone()
+    stats['receivable_start'], stats['receivable_end'] = dates[0] or today, dates[1] or today
+    stats['clients'] = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
     open_os = db.execute("""
-        SELECT o.id, o.created_at, c.name AS client_name, m.name AS mech, o.status
-        FROM orders o
-        JOIN clients c ON c.id = o.client_id
-        LEFT JOIN mechanics m ON m.id = o.mechanic_id
-        WHERE o.status IN ('Aberta','Em andamento')
-        ORDER BY o.id DESC LIMIT 8
+        SELECT o.id, COALESCE(NULLIF(o.os_date,''),substr(o.created_at,1,10)) AS os_date,
+               c.name AS client_name, m.name AS mech, o.status, v.plate, v.model,
+               COALESCE(o.labor,0) + COALESCE((SELECT SUM(total) FROM order_items WHERE order_id=o.id),0) AS total
+        FROM orders o JOIN clients c ON c.id=o.client_id
+        LEFT JOIN mechanics m ON m.id=o.mechanic_id LEFT JOIN vehicles v ON v.id=o.vehicle_id
+        WHERE o.status IN ('Aberta','Em andamento') ORDER BY o.id DESC LIMIT 6
     """).fetchall()
-    return render_template("index.html", title=APP_TITLE, low=low, open_os=open_os)
+    appointments = db.execute("""
+        SELECT a.*, c.name AS client_name, v.plate, m.name AS mech FROM agenda a
+        JOIN clients c ON c.id=a.client_id LEFT JOIN vehicles v ON v.id=a.vehicle_id
+        LEFT JOIN mechanics m ON m.id=a.mechanic_id
+        WHERE a.date=? ORDER BY a.time, a.id LIMIT 5
+    """, (today,)).fetchall()
+    return render_template('index.html', title='Visão geral', stats=stats, low=low,
+                           open_os=open_os, appointments=appointments, today=today)
 
-@login_required
 @app.route("/clientes", methods=["GET","POST"])
+@login_required
 def clientes():
     db = get_db()
-
-    # Cadastro via POST
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        phone = request.form.get("phone", "").strip()
-        cpf = request.form.get("cpf", "").strip()
-        address = request.form.get("address", "").strip()
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
         if not name:
-            flash("Nome é obrigatório.", "error")
+            flash('Preencha o nome do cliente.', 'error')
         else:
-            db.execute(
-                "INSERT INTO clients(name, phone, cpf, address) VALUES (?,?,?,?)",
-                (name, phone, cpf, address)
-            )
+            db.execute('INSERT INTO clients(name,phone,cpf,address) VALUES (?,?,?,?)',
+                (name, request.form.get('phone','').strip(), request.form.get('cpf','').strip(), request.form.get('address','').strip()))
             db.commit()
-            flash("Cliente cadastrado!", "ok")
-        return redirect(url_for("clientes"))
-
-    # Listagem / busca
-    q = request.args.get("q", "").strip()
+            flash('Cliente cadastrado!', 'ok')
+        return redirect(url_for('clientes'))
+    q = request.args.get('q', '').strip()
+    where, params = '', []
     if q:
-        rows = db.execute(
-            """
-            SELECT * FROM clients
-            WHERE name LIKE ? OR phone LIKE ? OR cpf LIKE ?
-            ORDER BY name
-            """,
-            (f"%{q}%", f"%{q}%", f"%{q}%")
-        ).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT * FROM clients ORDER BY id DESC LIMIT 100"
-        ).fetchall()
-
-    # Modo JSON para busca da Nova OS
-    if request.args.get("json") == "1":
-        data = [
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "phone": r["phone"],
-                "cpf": r["cpf"],
-                "address": r["address"],
-            }
-            for r in rows
-        ]
-        from flask import jsonify as _jsonify
-        return _jsonify(data)
-
-    # Modo normal (HTML)
-    return render_template("clientes.html", rows=rows, q=q, title="Clientes")
+        where = """ WHERE search_key(name) LIKE ? OR search_key(phone) LIKE ? OR search_key(cpf) LIKE ?
+            OR EXISTS (SELECT 1 FROM vehicles v WHERE v.client_id=clients.id AND search_key(v.plate) LIKE ?)"""
+        params = [f'%{search_key(q)}%'] * 4
+    count = db.execute('SELECT COUNT(*) FROM clients' + where, params).fetchone()[0]
+    pagination = pagination_for(count)
+    rows = db.execute('SELECT * FROM clients' + where + ' ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?',
+        params + [pagination['per_page'], pagination['offset']]).fetchall()
+    if request.args.get('json') == '1':
+        return jsonify([dict(r) for r in rows])
+    return render_template('clientes.html', rows=rows, q=q, pagination=pagination, title='Clientes')
 
 
-@login_required
 @app.route("/clientes/<int:cid>", methods=["GET","POST"])
+@login_required
 def cliente_edit(cid):
     db = get_db()
     if request.method == "POST":
@@ -459,8 +623,8 @@ def cliente_edit(cid):
     return render_template("cliente_edit.html", c=c, title="Editar Cliente")
 
 
-@login_required
 @app.route("/veiculos/<int:client_id>", methods=["GET","POST"])
+@login_required
 def veiculos(client_id):
     db = get_db()
     if request.method == "POST":
@@ -488,8 +652,8 @@ def veiculos(client_id):
     ).fetchall()
     return render_template("veiculos.html", c=c, vs=vs, os_rows=os_rows, title="Veículos")
 
-@login_required
 @app.route("/veiculos/<int:client_id>/<int:vehicle_id>/delete", methods=["POST"])
+@login_required
 def veiculo_delete(client_id, vehicle_id):
     """Exclui um veículo do cliente.
     As OS permanecem, apenas desvinculadas do veículo.
@@ -504,8 +668,8 @@ def veiculo_delete(client_id, vehicle_id):
     return redirect(url_for("veiculos", client_id=client_id))
 
 
-@login_required
 @app.route("/veiculos/<int:client_id>/<int:vehicle_id>/transferir", methods=["POST"])
+@login_required
 def veiculo_transferir(client_id, vehicle_id):
     """Transfere um veículo para outro cliente e atualiza as OS desse veículo."""
     db = get_db()
@@ -551,7 +715,14 @@ def veiculo_transferir(client_id, vehicle_id):
     return redirect(url_for("veiculos", client_id=new_client_id))
 
 
+@app.route("/api/clients/<int:client_id>/vehicles")
+@login_required
+def api_client_vehicles(client_id):
+    rows = get_db().execute("SELECT id,plate,model FROM vehicles WHERE client_id=? ORDER BY id DESC", (client_id,)).fetchall()
+    return jsonify([dict(row) for row in rows])
+
 @app.route("/api/clients_search")
+@login_required
 def api_clients_search():
     """Endpoint de autocomplete de clientes para Nova OS e outras telas."""
     db = get_db()
@@ -561,18 +732,19 @@ def api_clients_search():
     except ValueError:
         limit = 20
 
+    limit = max(1, min(limit, 50))
     if not q:
         rows = db.execute(
             "SELECT id, name, phone, cpf FROM clients ORDER BY name LIMIT ?",
             (limit,)
         ).fetchall()
     else:
-        like = f"%{q}%"
+        like = f"%{search_key(q)}%"
         rows = db.execute(
             """
             SELECT id, name, phone, cpf
             FROM clients
-            WHERE name LIKE ? OR phone LIKE ? OR cpf LIKE ?
+            WHERE search_key(name) LIKE ? OR search_key(phone) LIKE ? OR search_key(cpf) LIKE ?
             ORDER BY name
             LIMIT ?
             """,
@@ -600,183 +772,146 @@ def api_clients_search():
 
 
 
-@login_required
 @app.route("/estoque", methods=["GET","POST"])
+@login_required
 def estoque():
     db = get_db()
-    if request.method == "POST":
-        name = request.form.get("name","").strip()
-        sku = request.form.get("sku","").strip().upper() or None
-        stock = float(request.form.get("stock") or 0)
-        min_stock = float(request.form.get("min_stock") or 0)
-        price = float(request.form.get("price") or 0)
-        cost_price = float(request.form.get("cost_price") or 0)
-        repasse_value = float(request.form.get("repasse_value") or 0)
-        is_labor = 1 if request.form.get("is_labor") == "1" else 0
-
-        if not name:
-            flash("Nome é obrigatório.", "error")
-        else:
-            db.execute(
-                """INSERT INTO inventory(name, sku, stock, min_stock, price, is_labor, cost_price, repasse_value)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (name, sku, stock, min_stock, price, is_labor, cost_price, repasse_value),
-            )
+    if request.method == 'POST':
+        try:
+            values = inventory_values()
+            db.execute("""INSERT INTO inventory(name,sku,stock,min_stock,price,is_labor,cost_price,repasse_value)
+                VALUES (?,?,?,?,?,?,?,?)""", values)
             db.commit()
-            flash("Item adicionado ao estoque!", "ok")
-        return redirect(url_for("estoque"))
-
-    q = request.args.get("q","").strip()
+            flash('Item cadastrado!', 'ok')
+            return redirect(url_for('estoque'))
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            db.rollback()
+            flash(str(exc) if isinstance(exc, ValueError) else 'Este código já está cadastrado. Use outro SKU.', 'error')
+    q = request.args.get('q', '').strip()
+    kind = request.args.get('kind', '')
+    where, params = [], []
     if q:
-        rows = db.execute(
-            """
-            SELECT * FROM inventory
-            WHERE name LIKE ? OR sku LIKE ?
-            ORDER BY name
-            """,
-            (f"%{q}%", f"%{q}%"),
-        ).fetchall()
-    else:
-        rows = db.execute("SELECT * FROM inventory ORDER BY id DESC LIMIT 200").fetchall()
+        where.append('(search_key(name) LIKE ? OR search_key(sku) LIKE ?)')
+        params += [f'%{search_key(q)}%'] * 2
+    if kind == 'low': where.append('COALESCE(is_labor,0)=0 AND stock<=min_stock')
+    elif kind == 'parts': where.append('COALESCE(is_labor,0)=0')
+    elif kind == 'labor': where.append('is_labor=1')
+    clause = ' WHERE ' + ' AND '.join(where) if where else ''
+    count = db.execute('SELECT COUNT(*) FROM inventory' + clause, params).fetchone()[0]
+    pagination = pagination_for(count)
+    rows = db.execute('SELECT * FROM inventory' + clause + ' ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?',
+        params + [pagination['per_page'], pagination['offset']]).fetchall()
+    stats = db.execute("""SELECT COUNT(*) AS total,
+        SUM(CASE WHEN COALESCE(is_labor,0)=0 AND stock<=min_stock THEN 1 ELSE 0 END) AS low,
+        COALESCE(SUM(CASE WHEN COALESCE(is_labor,0)=0 THEN stock*cost_price ELSE 0 END),0) AS cost
+        FROM inventory""").fetchone()
+    return render_template('estoque.html', rows=rows, q=q, kind=kind, stats=stats,
+        pagination=pagination, title='Peças e serviços'), (400 if request.method == 'POST' else 200)
 
-    return render_template("estoque.html", rows=rows, q=q, title="Estoque")
 
-
-@login_required
 @app.route("/estoque/<int:item_id>/editar", methods=["GET","POST"])
+@login_required
 def estoque_editar(item_id):
     db = get_db()
-    item = db.execute("SELECT * FROM inventory WHERE id = ?", (item_id,)).fetchone()
+    item = db.execute('SELECT * FROM inventory WHERE id=?', (item_id,)).fetchone()
     if not item:
-        flash("Item não encontrado.", "error")
-        return redirect(url_for("estoque"))
-
-    if request.method == "POST":
-        name = request.form.get("name","").strip()
-        sku = request.form.get("sku","").strip().upper() or None
-        stock = float(request.form.get("stock") or 0)
-        min_stock = float(request.form.get("min_stock") or 0)
-        price = float(request.form.get("price") or 0)
-        cost_price = float(request.form.get("cost_price") or 0)
-        repasse_value = float(request.form.get("repasse_value") or 0)
-        is_labor = 1 if request.form.get("is_labor") == "1" else 0
-
-        if not name:
-            flash("Nome é obrigatório.", "error")
-            return redirect(request.url)
-
-        db.execute(
-            """UPDATE inventory
-               SET name = ?, sku = ?, stock = ?, min_stock = ?, price = ?, is_labor = ?, cost_price = ?, repasse_value = ?
-               WHERE id = ?""",
-            (name, sku, stock, min_stock, price, is_labor, cost_price, repasse_value, item_id),
-        )
-        db.commit()
-        flash("Item atualizado!", "ok")
-        return redirect(url_for("estoque"))
-
-    return render_template("estoque_editar.html", item=item, title="Editar item de estoque")
+        flash('Item não encontrado.', 'error')
+        return redirect(url_for('estoque'))
+    if request.method == 'POST':
+        try:
+            values = inventory_values()
+            db.execute("""UPDATE inventory SET name=?,sku=?,stock=?,min_stock=?,price=?,is_labor=?,cost_price=?,repasse_value=?
+                WHERE id=?""", values + (item_id,))
+            db.commit()
+            flash('Item atualizado!', 'ok')
+            return redirect(url_for('estoque'))
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            db.rollback()
+            flash(str(exc) if isinstance(exc, ValueError) else 'Este código já está cadastrado. Use outro SKU.', 'error')
+            item = dict(request.form)
+            item['is_labor'] = '1' in request.form.getlist('is_labor')
+            return render_template('estoque_editar.html', item=item, title='Editar item'), 400
+    return render_template('estoque_editar.html', item=item, title='Editar item')
 
 
 
 
-@login_required
 @app.route("/api/inventory_search")
+@login_required
 def inventory_search():
     db = get_db()
-    q = request.args.get("q","").strip()
-    limit = int(request.args.get("limit") or 20)
-    if not q:
-        items = db.execute("SELECT id, name, price, stock FROM inventory ORDER BY name LIMIT ?", (limit,)).fetchall()
-    else:
-        items = db.execute("""
-            SELECT id, name, price, stock FROM inventory
-            WHERE name LIKE ? OR sku LIKE ?
-            ORDER BY name LIMIT ?
-        """, (f"%{q}%", f"%{q}%", limit)).fetchall()
-    data = [dict(id=i["id"], name=i["name"], price=i["price"], stock=i["stock"]) for i in items]
-    return jsonify(data)
+    q = search_key(request.args.get('q', '').strip())
+    limit = bounded_int(request.args.get('limit'), 20, 1, 50)
+    rows = db.execute("""SELECT id,name,sku,price,stock,is_labor,min_stock FROM inventory
+        WHERE search_key(name) LIKE ? OR search_key(sku) LIKE ? ORDER BY name LIMIT ?""",
+        (f'%{q}%', f'%{q}%', limit)).fetchall()
+    return jsonify([dict(r) for r in rows])
 
 
-@login_required
 @app.route("/os")
+@login_required
 def os_list():
     db = get_db()
-    status = request.args.get("status", "").strip()
-    mech_id = request.args.get("mechanic_id", "").strip()
-    d_start = request.args.get("start", "").strip()
-    d_end = request.args.get("end", "").strip()
-    q = request.args.get("q", "").strip()
-
-    where = []
-    params = []
-
-    if status:
-        where.append("o.status = ?")
+    status = request.args.get('status', '').strip()
+    mech_id = request.args.get('mechanic_id', '').strip()
+    d_start = request.args.get('start', '').strip()
+    d_end = request.args.get('end', '').strip()
+    q = request.args.get('q', '').strip()
+    pay_status = request.args.get('pay_status', '').strip()
+    where, params = [], []
+    if status == 'Em aberto':
+        where.append("o.status IN ('Aberta','Em andamento')")
+    elif status in ORDER_STATUSES:
+        where.append('o.status=?')
         params.append(status)
-    if mech_id:
-        try:
-            mech_int = int(mech_id)
-            where.append("o.mechanic_id = ?")
-            params.append(mech_int)
-        except ValueError:
-            mech_id = ""
-
-    if d_start:
-        try:
-            ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
-            params.append(ds.strftime("%Y-%m-%d"))
-        except ValueError:
-            d_start = ""
-    if d_end:
-        try:
-            de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
-            params.append(de.strftime("%Y-%m-%d"))
-        except ValueError:
-            d_end = ""
-
+    else:
+        status = ''
+    if mech_id.isdigit():
+        where.append('o.mechanic_id=?')
+        params.append(int(mech_id))
+    else:
+        mech_id = ''
+    if pay_status:
+        where.append("COALESCE(o.pay_status,'Pendente')=?")
+        params.append(pay_status)
+    for value, operator in [(d_start, '>='), (d_end, '<=')]:
+        if value:
+            try:
+                datetime.date.fromisoformat(value)
+                where.append(f"COALESCE(NULLIF(o.os_date,''),substr(o.created_at,1,10)) {operator} ?")
+                params.append(value)
+            except ValueError:
+                if operator == '>=': d_start = ''
+                else: d_end = ''
     if q:
-        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
-
+        where.append("(search_key(c.name) LIKE ? OR search_key(v.plate) LIKE ? OR search_key(v.model) LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f'%{search_key(q)}%'
+        params.extend([like] * 4)
     sql = """
-        SELECT o.id, o.created_at, COALESCE(o.os_date, substr(o.created_at,1,10)) AS os_date, o.status, o.labor,
-               c.name AS client_name, v.plate, m.name AS mech,
-               COALESCE(SUM(oi.total),0) AS total_itens,
-               COALESCE(SUM(oi.total),0) + COALESCE(o.labor,0) AS total_geral
-        FROM orders o
-        JOIN clients c ON c.id=o.client_id
-        LEFT JOIN vehicles v ON v.id=o.vehicle_id
-        LEFT JOIN mechanics m ON m.id=o.mechanic_id
+        SELECT o.id, o.created_at, COALESCE(NULLIF(o.os_date,''),substr(o.created_at,1,10)) AS os_date,
+               o.status, o.pay_status, o.labor, c.name AS client_name, v.plate, v.model, m.name AS mech,
+               COALESCE(SUM(CASE WHEN COALESCE(oi.is_labor,0)=0 THEN oi.total ELSE 0 END),0) AS total_pecas,
+               COALESCE(SUM(oi.total),0)+COALESCE(o.labor,0) AS total_geral
+        FROM orders o JOIN clients c ON c.id=o.client_id
+        LEFT JOIN vehicles v ON v.id=o.vehicle_id LEFT JOIN mechanics m ON m.id=o.mechanic_id
         LEFT JOIN order_items oi ON oi.order_id=o.id
     """
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " GROUP BY o.id ORDER BY o.id DESC LIMIT 200"
-
-    rows = db.execute(sql, params).fetchall()
-    mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-
-    return render_template(
-        "os_list.html",
-        rows=rows,
-        mechs=mechs,
-        status=status,
-        mech_id=mech_id,
-        q=q,
-        start=d_start,
-        end=d_end,
-        title="Ordens de Serviço"
-    )
+    if where: sql += ' WHERE ' + ' AND '.join(where)
+    sql += ' GROUP BY o.id'
+    summary = dict(db.execute(f"""SELECT COUNT(*) AS count, COALESCE(SUM(total_geral),0) AS total,
+        COALESCE(SUM(total_pecas),0) AS parts FROM ({sql})""", params).fetchone())
+    pagination = pagination_for(summary['count'])
+    rows = db.execute(sql + ' ORDER BY o.id DESC LIMIT ? OFFSET ?',
+                      params + [pagination['per_page'], pagination['offset']]).fetchall()
+    return render_template('os_list.html', rows=rows, mechs=db.execute('SELECT * FROM mechanics ORDER BY name').fetchall(),
+        status=status, mech_id=mech_id, q=q, start=d_start, end=d_end, pay_status=pay_status,
+        summary=summary, pagination=pagination, title='Ordens de serviço')
 # =========================
 # Exportações (backup rápido)
 # =========================
 
-@login_required
 @app.route("/export/os.csv")
+@login_required
 def export_os_csv():
     """
     Exporta lista de OS (com filtros iguais da tela /os) em CSV.
@@ -792,9 +927,14 @@ def export_os_csv():
     where = []
     params = []
 
-    if status:
+    if status == 'Em aberto':
+        where.append("o.status IN ('Aberta','Em andamento')")
+    elif status:
         where.append("o.status = ?")
         params.append(status)
+    if request.args.get("pay_status"):
+        where.append("COALESCE(o.pay_status,'Pendente')=?")
+        params.append(request.args["pay_status"])
     if mech_id:
         try:
             mech_int = int(mech_id)
@@ -806,29 +946,30 @@ def export_os_csv():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            where.append("COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) >= ?")
             params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            where.append("COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) <= ?")
             params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
     if q:
-        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
+        where.append("(search_key(c.name) LIKE ? OR search_key(v.plate) LIKE ? OR search_key(v.model) LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f"%{search_key(q)}%"
+        params.extend([like, like, like, like])
 
     sql = """
-        SELECT o.id, o.created_at, COALESCE(o.os_date, substr(o.created_at,1,10)) AS os_date, o.status, o.labor, o.pay_method, o.pay_status,
+        SELECT o.id, o.created_at, COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) AS os_date, o.status, o.labor, o.pay_method, o.pay_status,
                c.name AS client_name,
                v.plate, v.model,
                m.name AS mech,
-               COALESCE(SUM(oi.total),0) AS total_itens,
+               COALESCE(SUM(CASE WHEN COALESCE(oi.is_labor,0)=0 THEN oi.total ELSE 0 END),0) AS total_itens,
+               COALESCE(o.labor,0)+COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END),0) AS total_servicos,
                COALESCE(SUM(oi.total),0) + COALESCE(o.labor,0) AS total_geral
         FROM orders o
         JOIN clients c ON c.id=o.client_id
@@ -852,7 +993,7 @@ def export_os_csv():
             r["model"] or "",
             r["mech"] or "",
             r["status"] or "",
-            float(r["labor"] or 0),
+            float(r["total_servicos"] or 0),
             float(r["total_itens"] or 0),
             float(r["total_geral"] or 0),
             r["pay_method"] or "",
@@ -865,8 +1006,8 @@ def export_os_csv():
         out
     )
 
-@login_required
 @app.route("/export/os_itens.csv")
+@login_required
 def export_os_itens_csv():
     """
     Exporta itens das OS (uma linha por item).
@@ -884,9 +1025,14 @@ def export_os_itens_csv():
     where = []
     params = []
 
-    if status:
+    if status == 'Em aberto':
+        where.append("o.status IN ('Aberta','Em andamento')")
+    elif status:
         where.append("o.status = ?")
         params.append(status)
+    if request.args.get("pay_status"):
+        where.append("COALESCE(o.pay_status,'Pendente')=?")
+        params.append(request.args["pay_status"])
     if mech_id:
         try:
             mech_int = int(mech_id)
@@ -898,25 +1044,25 @@ def export_os_itens_csv():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            where.append("COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) >= ?")
             params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            where.append("COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) <= ?")
             params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
     if q:
-        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
+        where.append("(search_key(c.name) LIKE ? OR search_key(v.plate) LIKE ? OR search_key(v.model) LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f"%{search_key(q)}%"
+        params.extend([like, like, like, like])
 
     sql = """
-        SELECT o.id AS os_id, o.created_at, o.status,
+        SELECT o.id AS os_id, o.created_at, COALESCE(NULLIF(o.os_date,''),substr(o.created_at,1,10)) AS os_date, o.status,
                c.name AS client_name,
                v.plate, v.model,
                m.name AS mech,
@@ -959,8 +1105,8 @@ def export_os_itens_csv():
 
 
 
-@login_required
 @app.route("/print/os")
+@login_required
 def print_os():
     """
     Página enxuta para imprimir/salvar PDF com Ctrl+P.
@@ -976,9 +1122,14 @@ def print_os():
     where = []
     params = []
 
-    if status:
+    if status == 'Em aberto':
+        where.append("o.status IN ('Aberta','Em andamento')")
+    elif status:
         where.append("o.status = ?")
         params.append(status)
+    if request.args.get("pay_status"):
+        where.append("COALESCE(o.pay_status,'Pendente')=?")
+        params.append(request.args["pay_status"])
     if mech_id:
         try:
             mech_int = int(mech_id)
@@ -990,29 +1141,30 @@ def print_os():
     if d_start:
         try:
             ds = datetime.datetime.strptime(d_start, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) >= ?")
+            where.append("COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) >= ?")
             params.append(ds.strftime("%Y-%m-%d"))
         except ValueError:
             d_start = ""
     if d_end:
         try:
             de = datetime.datetime.strptime(d_end, "%Y-%m-%d")
-            where.append("COALESCE(o.os_date, substr(o.created_at,1,10)) <= ?")
+            where.append("COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) <= ?")
             params.append(de.strftime("%Y-%m-%d"))
         except ValueError:
             d_end = ""
 
     if q:
-        where.append("(c.name LIKE ? OR v.plate LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
+        where.append("(search_key(c.name) LIKE ? OR search_key(v.plate) LIKE ? OR search_key(v.model) LIKE ? OR CAST(o.id AS TEXT) LIKE ?)")
+        like = f"%{search_key(q)}%"
+        params.extend([like, like, like, like])
 
     sql = """
-        SELECT o.id, o.created_at, COALESCE(o.os_date, substr(o.created_at,1,10)) AS os_date, o.status, o.labor, o.pay_method, o.pay_status,
+        SELECT o.id, o.created_at, COALESCE(NULLIF(o.os_date,''), substr(o.created_at,1,10)) AS os_date, o.status, o.labor, o.pay_method, o.pay_status,
                c.name AS client_name,
                v.plate, v.model,
                m.name AS mech,
-               COALESCE(SUM(oi.total),0) AS total_itens,
+               COALESCE(SUM(CASE WHEN COALESCE(oi.is_labor,0)=0 THEN oi.total ELSE 0 END),0) AS total_itens,
+               COALESCE(o.labor,0)+COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END),0) AS total_servicos,
                COALESCE(SUM(oi.total),0) + COALESCE(o.labor,0) AS total_geral
         FROM orders o
         JOIN clients c ON c.id=o.client_id
@@ -1028,8 +1180,8 @@ def print_os():
     return render_template("print_os.html", rows=rows, title="Impressão de OS")
 
 
-@login_required
 @app.route("/export/clientes.csv")
+@login_required
 def export_clientes_csv():
     """
     Exporta lista de clientes em CSV.
@@ -1041,10 +1193,11 @@ def export_clientes_csv():
             """
             SELECT id, name, phone, cpf, address
             FROM clients
-            WHERE name LIKE ? OR phone LIKE ? OR cpf LIKE ?
+            WHERE search_key(name) LIKE ? OR search_key(phone) LIKE ? OR search_key(cpf) LIKE ?
+              OR EXISTS (SELECT 1 FROM vehicles v WHERE v.client_id=clients.id AND search_key(v.plate) LIKE ?)
             ORDER BY name
             """,
-            (f"%{q}%", f"%{q}%", f"%{q}%")
+            (f"%{search_key(q)}%",) * 4
         ).fetchall()
     else:
         rows = db.execute("SELECT id, name, phone, cpf, address FROM clients ORDER BY name").fetchall()
@@ -1060,8 +1213,8 @@ def export_clientes_csv():
     )
 
 
-@login_required
 @app.route("/print/clientes")
+@login_required
 def print_clientes():
     """
     Página enxuta para imprimir/salvar PDF com Ctrl+P (clientes).
@@ -1073,10 +1226,11 @@ def print_clientes():
             """
             SELECT id, name, phone, cpf, address
             FROM clients
-            WHERE name LIKE ? OR phone LIKE ? OR cpf LIKE ?
+            WHERE search_key(name) LIKE ? OR search_key(phone) LIKE ? OR search_key(cpf) LIKE ?
+              OR EXISTS (SELECT 1 FROM vehicles v WHERE v.client_id=clients.id AND search_key(v.plate) LIKE ?)
             ORDER BY name
             """,
-            (f"%{q}%", f"%{q}%", f"%{q}%")
+            (f"%{search_key(q)}%",) * 4
         ).fetchall()
     else:
         rows = db.execute("SELECT id, name, phone, cpf, address FROM clients ORDER BY name").fetchall()
@@ -1087,8 +1241,8 @@ def print_clientes():
 
 
 
-@login_required
 @app.route("/export/backup.sql")
+@login_required
 def export_backup_sql():
     """
     Dump completo do banco SQLite em SQL (backup real).
@@ -1117,111 +1271,22 @@ def export_backup_sql():
 
 
 
-@login_required
 @app.route("/os/nova", methods=["GET","POST"])
+@login_required
 def os_new():
-    db = get_db()
-    if request.method == "POST":
-        client_id = int(request.form.get("client_id") or 0)
-
-        # Veículo pode ser um existente (vehicle_id) ou um novo digitado no formulário
-        vehicle_id_raw = request.form.get("vehicle_id")
-        vehicle_id = int(vehicle_id_raw) if vehicle_id_raw else None
-
-        vehicle_plate = (request.form.get("vehicle_plate") or "").strip().upper()
-        vehicle_text = (request.form.get("vehicle_text") or "").strip()
-
-        notes = request.form.get("notes", "").strip()
-        base_labor = float(request.form.get("labor") or 0)
-        os_date = (request.form.get("os_date") or "").strip() or datetime.date.today().strftime("%Y-%m-%d")
-        mechanic_id = int(request.form.get("mechanic_id") or 0) or None
-        created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if not client_id:
-            flash("Selecione um cliente.", "error")
-            return redirect(url_for("os_new"))
-
-        # Se não veio vehicle_id mas temos dados digitados, cria ou reaproveita veículo
-        if client_id and not vehicle_id and (vehicle_plate or vehicle_text):
-            existing = None
-            if vehicle_plate:
-                existing = db.execute(
-                    "SELECT id FROM vehicles WHERE client_id=? AND plate=?",
-                    (client_id, vehicle_plate),
-                ).fetchone()
-            if existing:
-                vehicle_id = existing["id"]
-            else:
-                model_text = vehicle_text or None
-                cur_v = db.execute(
-                    "INSERT INTO vehicles(client_id, plate, model, year) VALUES (?,?,?,?)",
-                    (client_id, vehicle_plate or None, model_text, None),
-                )
-                vehicle_id = cur_v.lastrowid
-
-        labor = base_labor
-        items = []        # peças e serviços (itens da OS)
-        labor_descs = []  # textos de serviços (pra observação)
-
-        for i in range(1, 51):
-            desc = request.form.get(f"item_desc_{i}")
-            if not desc:
-                continue
-
-            qty = float(request.form.get(f"item_qty_{i}") or 1)
-            price = float(request.form.get(f"item_price_{i}") or 0)
-            inv_id = request.form.get(f"item_inv_{i}")
-            inv_id = int(inv_id) if inv_id else None
-            is_labor = request.form.get(f"item_is_labor_{i}") == "1"
-            total = qty * price
-
-            if is_labor:
-                labor_descs.append(f"{desc.strip()} (R$ {total:.2f})")
-                items.append({"inventory_id": None, "description": desc.strip(), "qty": qty, "unit_price": price, "total": total, "is_labor": 1})
-            else:
-                items.append({"inventory_id": inv_id, "description": desc.strip(), "qty": qty, "unit_price": price, "total": total, "is_labor": 0})
-
-        if labor_descs:
-            extra = "Serviços:\n- " + "\n- ".join(labor_descs)
-            notes = f"{notes}\n\n{extra}" if notes else extra
-
-        cur = db.execute(
-            """INSERT INTO orders(client_id, vehicle_id, created_at, os_date, status, notes, labor, mechanic_id, pay_method, pay_status)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (client_id, vehicle_id, created_at, os_date, "Aberta", notes, base_labor, mechanic_id, "Dinheiro", "Pendente")
-        )
-        os_id = cur.lastrowid
-
-        if items:
-            db.executemany(
-                """INSERT INTO order_items(order_id, inventory_id, description, qty, unit_price, total, is_labor)
-                    VALUES (?,?,?,?,?,?,?)""",
-                [
-                    (os_id, it["inventory_id"], it["description"], it["qty"], it["unit_price"], it["total"], it["is_labor"])
-                    for it in items
-                ]
-            )
-
-        # --- sync financeiro (OS -> lançamento PENDENTE/EFETIVADO/CANCELADO)
+    if request.method == 'POST':
         try:
-            rcn = db.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
-            client_name = rcn["name"] if rcn else None
-            sync_os_to_finance(db, os_id, client_name, "Aberta", "Dinheiro", "Pendente", base_labor, items)
-        except Exception as e:
-            print("ERRO sync_os_to_finance (os_new):", e)
-
-        db.commit()
-        flash(f"OS #{os_id} criada!", "ok")
-        return redirect(url_for("os_view", os_id=os_id))
-
-    clients = db.execute("SELECT id, name FROM clients ORDER BY name").fetchall()
-    vehicles = db.execute(
-        """SELECT v.id, v.plate, v.model, c.name AS client_name
-           FROM vehicles v JOIN clients c ON c.id=v.client_id
-           ORDER BY v.id DESC"""
-    ).fetchall()
-    mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-    return render_template("os_new.html", clients=clients, vehicles=vehicles, mechs=mechs, today=datetime.date.today().strftime("%Y-%m-%d"), title="Nova OS")
+            os_id = save_order()
+            flash(f'OS #{os_id} criada!', 'ok')
+            return redirect(url_for('os_view', os_id=os_id))
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return render_order_form(code=400)
+        except sqlite3.Error:
+            app.logger.exception('Falha ao salvar nova OS')
+            flash('Não foi possível salvar. Os dados preenchidos foram mantidos; tente novamente.', 'error')
+            return render_order_form(code=503)
+    return render_order_form()
 
 @app.route("/os/<int:os_id>")
 def os_view(os_id):
@@ -1283,8 +1348,8 @@ def qr_os(os_id):
     return send_file(buf, mimetype="image/png")
 
 
-@login_required
 @app.route("/mecanicos", methods=["GET","POST"])
+@login_required
 def mecanicos():
     db = get_db()
     if request.method == "POST":
@@ -1304,8 +1369,8 @@ def mecanicos():
     return render_template("mecanicos.html", rows=rows, title="Mecânicos")
 
 
-@login_required
 @app.route("/mecanicos/<int:mech_id>/excluir", methods=["POST"])
+@login_required
 def mecanico_excluir(mech_id):
     db = get_db()
     used = db.execute("SELECT COUNT(*) c FROM orders WHERE mechanic_id=?", (mech_id,)).fetchone()["c"]
@@ -1318,8 +1383,8 @@ def mecanico_excluir(mech_id):
     return redirect(url_for("mecanicos"))
 
 
-@login_required
 @app.route("/relatorio/mecanicos")
+@login_required
 def relatorio_mecanicos():
     db = get_db()
 
@@ -1338,8 +1403,6 @@ def relatorio_mecanicos():
     except ValueError:
         start = end - datetime.timedelta(days=6)
 
-    start_ts = datetime.datetime.combine(start, datetime.time.min).strftime("%Y-%m-%d %H:%M:%S")
-    end_ts = datetime.datetime.combine(end, datetime.time.max).strftime("%Y-%m-%d %H:%M:%S")
 
     # Percentual de repasse vindo da tela (?repasse=50, por exemplo)
     repasse_str = request.args.get("repasse") or "50"
@@ -1359,7 +1422,8 @@ def relatorio_mecanicos():
         WITH os AS (
             SELECT id, mechanic_id, labor, created_at
             FROM orders
-            WHERE created_at BETWEEN ? AND ?
+            WHERE COALESCE(NULLIF(os_date,''),substr(created_at,1,10)) BETWEEN ? AND ?
+              AND status != 'Cancelada'
         ),
         agg AS (
             SELECT mechanic_id,
@@ -1387,7 +1451,7 @@ def relatorio_mecanicos():
         LEFT JOIN itens i ON i.mechanic_id = m.id
         ORDER BY total DESC
         """,
-        (start_ts, end_ts),
+        (start.isoformat(), end.isoformat()),
     ).fetchall()
 
     rows = []
@@ -1406,7 +1470,7 @@ def relatorio_mecanicos():
 
         ticket = tot / qtd if qtd else 0
         perc_mao = (mao / tot * 100) if tot > 0 else 0
-        repasse_valor = tot * REPASSE_PERCENT
+        repasse_valor = mao * REPASSE_PERCENT
 
         total_os += qtd
         total_labor += mao
@@ -1450,22 +1514,23 @@ def relatorio_mecanicos():
             o.id,
             o.mechanic_id,
             m.name AS mechanic,
-            o.created_at,
+            COALESCE(NULLIF(o.os_date,''),substr(o.created_at,1,10)) AS created_at,
             c.name AS client_name,
             v.plate,
-            COALESCE(o.labor, 0) AS labor,
-            COALESCE(SUM(oi.total), 0) AS soma_pecas,
+            COALESCE(o.labor,0)+COALESCE(SUM(CASE WHEN oi.is_labor=1 THEN oi.total ELSE 0 END),0) AS labor,
+            COALESCE(SUM(CASE WHEN COALESCE(oi.is_labor,0)=0 THEN oi.total ELSE 0 END),0) AS soma_pecas,
             COALESCE(SUM(oi.total), 0) + COALESCE(o.labor, 0) AS total_os
         FROM orders o
         JOIN mechanics m ON m.id = o.mechanic_id
         JOIN clients c ON c.id = o.client_id
         LEFT JOIN vehicles v ON v.id = o.vehicle_id
         LEFT JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.created_at BETWEEN ? AND ?
+        WHERE COALESCE(NULLIF(o.os_date,''),substr(o.created_at,1,10)) BETWEEN ? AND ?
+          AND o.status != 'Cancelada'
         GROUP BY o.id
         ORDER BY m.name, o.id DESC
         """,
-        (start_ts, end_ts),
+        (start.isoformat(), end.isoformat()),
     ).fetchall()
 
     return render_template(
@@ -1479,8 +1544,8 @@ def relatorio_mecanicos():
     )
 
 
-@login_required
 @app.route("/agenda", methods=["GET", "POST"])
+@login_required
 def agenda():
     db = get_db()
     # --- CADASTRAR NOVO AGENDAMENTO ---
@@ -1582,8 +1647,8 @@ def agenda():
     )
 
 
-@login_required
 @app.route("/agenda/<int:aid>/whatsapp")
+@login_required
 def enviar_whatsapp_agenda(aid):
     db = get_db()
     ag = db.execute(
@@ -1631,236 +1696,48 @@ def enviar_whatsapp_agenda(aid):
 
 
 
-@login_required
 @app.route("/os/<int:os_id>/editar", methods=["GET","POST"])
+@login_required
 def os_edit(os_id):
     db = get_db()
-    # Carrega OS com dados do cliente e veículo
-    o = db.execute("""
-        SELECT o.*, c.name AS client_name, v.plate, v.model
-        FROM orders o
-        JOIN clients c ON c.id = o.client_id
-        LEFT JOIN vehicles v ON v.id = o.vehicle_id
-        WHERE o.id = ?
-    """, (os_id,)).fetchone()
-
-    if not o:
-        flash("OS não encontrada.", "error")
-        return redirect(url_for("os_list"))
-
-    if request.method == "POST":
-        # Cliente da OS não muda aqui
-        client_id = o["client_id"]
-        vehicle_id = o["vehicle_id"]
-
-        status = request.form.get("status") or (o["status"] or "Aberta")
-        pay_method = (request.form.get("pay_method") or (o["pay_method"] or "Dinheiro")).strip()
-        pay_status = (request.form.get("pay_status") or (o["pay_status"] or "Pendente")).strip()
-
-        notes = (request.form.get("notes") or "").strip()
-        base_labor = float(request.form.get("labor") or 0)
-
-        os_date = (request.form.get("os_date") or "").strip() or (o["os_date"] or (o["created_at"][:10] if o["created_at"] else ""))
-
-        mechanic_raw = request.form.get("mechanic_id")
-        mechanic_id = int(mechanic_raw) if mechanic_raw else None
-
-        vehicle_plate = (request.form.get("vehicle_plate") or "").strip().upper()
-        vehicle_text = (request.form.get("vehicle_text") or "").strip()
-
-        # Atualiza ou cria veículo se veio informação
-        if client_id and (vehicle_plate or vehicle_text):
-            if vehicle_id:
-                # Atualiza o veículo já vinculado
-                db.execute(
-                    "UPDATE vehicles SET plate = ?, model = ? WHERE id = ?",
-                    (vehicle_plate or None, vehicle_text or None, vehicle_id),
-                )
-            else:
-                # Não havia veículo vinculado, tenta reaproveitar ou cria um novo
-                existing = None
-                if vehicle_plate:
-                    existing = db.execute(
-                        "SELECT id FROM vehicles WHERE client_id = ? AND plate = ?",
-                        (client_id, vehicle_plate),
-                    ).fetchone()
-                if existing:
-                    vehicle_id = existing["id"]
-                else:
-                    cur_v = db.execute(
-                        "INSERT INTO vehicles(client_id, plate, model, year) VALUES (?,?,?,?)",
-                        (client_id, vehicle_plate or None, vehicle_text or None, None),
-                    )
-                    vehicle_id = cur_v.lastrowid
-
-        # 1) Remove itens antigos
-        db.execute("DELETE FROM order_items WHERE order_id = ?", (os_id,))
-
-        # 3) Lê itens do formulário e recalcula
-        items = []  # lista de dicts com is_labor=0/1
-        labor_descs = []
-
-        for i in range(1, 51):
-            desc = request.form.get(f"item_desc_{i}")
-            if not desc:
-                continue
-
-            qty = float(request.form.get(f"item_qty_{i}") or 1)
-            price = float(request.form.get(f"item_price_{i}") or 0)
-            inv_id_raw = request.form.get(f"item_inv_{i}")
-            inv_id = int(inv_id_raw) if inv_id_raw else None
-            is_labor = request.form.get(f"item_is_labor_{i}") == "1"
-            total = qty * price
-
-            if is_labor:
-                # serviços extras ficam guardados como item (sem mexer em estoque)
-                labor_descs.append(f"{desc.strip()} (R$ {total:.2f})")
-                items.append({
-                    "inventory_id": None,
-                    "description": desc.strip(),
-                    "qty": qty,
-                    "unit_price": price,
-                    "total": total,
-                    "is_labor": 1,
-                })
-            else:
-                items.append({
-                    "inventory_id": inv_id,
-                    "description": desc.strip(),
-                    "qty": qty,
-                    "unit_price": price,
-                    "total": total,
-                    "is_labor": 0,
-                })
-
-        # Opcional: anexa descrição dos serviços nas observações (pra ficar legível)
-        if labor_descs:
-            extra = "Serviços:\n- " + "\n- ".join(labor_descs)
-            notes = f"{notes}\n\n{extra}" if notes else extra
-
-        
-        # --- estoque automático: baixa apenas quando a OS estiver FECHADA ---
-        # Se faltar peça para a diferença (delta), não deixa fechar para não estourar o estoque
-        if _is_os_closed(status):
-            applied_map = _get_os_applied_parts(db, os_id)
-            desired_map = _desired_parts_from_items(items)
-            delta_plus = {}
-            for inv_id in set(desired_map) | set(applied_map):
-                dlt = float(desired_map.get(inv_id, 0.0) - applied_map.get(inv_id, 0.0))
-                if dlt > 0:
-                    delta_plus[int(inv_id)] = dlt
-            faltas = _check_stock_for_delta(db, delta_plus)
-            if faltas:
-                msg = "Estoque insuficiente para fechar a OS. Ajuste as quantidades: " + "; ".join(
-                    [f"{f['name']} (tem {int(f['have'])}, precisa +{f['need']:.2f})" for f in faltas]
-                )
-                flash(msg, "error")
-                mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-                o2 = dict(o)
-                o2.update({
-                    "status": status,
-                    "pay_method": pay_method,
-                    "pay_status": pay_status,
-                    "notes": notes,
-                    "labor": base_labor,
-                    "mechanic_id": mechanic_id,
-                    "vehicle_id": vehicle_id,
-                })
-                return render_template(
-                    "os_edit.html",
-                    o=o2,
-                    its=items,
-                    mechs=mechs,
-                    title=f"Editar OS #{os_id}",
-                )
-
-# 4) Atualiza a OS (mantém created_at)
-        db.execute(
-            """
-            UPDATE orders
-               SET vehicle_id = ?,
-                   os_date = ?,
-                   status = ?,
-                   notes = ?,
-                   labor = ?,
-                   mechanic_id = ?,
-                   pay_method = ?,
-                   pay_status = ?
-             WHERE id = ?
-            """,
-            (vehicle_id, os_date, status, notes, base_labor, mechanic_id, pay_method, pay_status, os_id),
-        )
-
-        # 5) Reinsere itens (peças e serviços extras)
-        if items:
-            db.executemany(
-                """
-                INSERT INTO order_items(order_id, inventory_id, description, qty, unit_price, total, is_labor)
-                VALUES (?,?,?,?,?,?,?)
-                """,
-                [
-                    (os_id, it["inventory_id"], it["description"], it["qty"], it["unit_price"], it["total"], it["is_labor"])
-                    for it in items
-                ],
-            )
-
-        # --- sync financeiro (OS -> lançamento + detalhamento)
+    order = db.execute("""SELECT o.*,c.name AS client_name,v.plate,v.model FROM orders o
+        JOIN clients c ON c.id=o.client_id LEFT JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?""", (os_id,)).fetchone()
+    if not order:
+        flash('OS não encontrada.', 'error')
+        return redirect(url_for('os_list'))
+    if request.method == 'POST':
         try:
-            sync_os_to_finance(db, os_id, o.get("client_name"), status, pay_method, pay_status, base_labor, items)
-        except Exception:
-            pass
-
-        
-        # aplica (ou desfaz) estoque conforme status (FECHADA baixa; caso contrário devolve)
-        try:
-            reconcile_os_stock(db, os_id, status, items)
-        except Exception:
-            pass
-        db.commit()
-        flash("OS atualizada com sucesso!", "ok")
-        return redirect(url_for("os_view", os_id=os_id))
-
-    # GET: carrega itens e mecânicos para montar o formulário completo
-    mechs = db.execute("SELECT id, name FROM mechanics ORDER BY name").fetchall()
-    its = db.execute(
-        """
-        SELECT i.*, inv.name AS inv_name
-        FROM order_items i
-        LEFT JOIN inventory inv ON inv.id = i.inventory_id
-        WHERE i.order_id = ?
-        ORDER BY i.id
-        """,
-        (os_id,),
-    ).fetchall()
-
-    return render_template(
-        "os_edit.html",
-        o=o,
-        its=its,
-        mechs=mechs,
-        title=f"Editar OS #{os_id}",
-    )
+            save_order(order)
+            flash('OS atualizada com sucesso!', 'ok')
+            return redirect(url_for('os_view', os_id=os_id))
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return render_order_form(order, code=400)
+        except sqlite3.Error:
+            app.logger.exception('Falha ao atualizar OS %s', os_id)
+            flash('Não foi possível salvar. Nenhuma alteração foi aplicada; tente novamente.', 'error')
+            return render_order_form(order, code=503)
+    return render_order_form(order)
 
 
-@login_required
 @app.route("/os/<int:os_id>/excluir", methods=["POST"])
+@login_required
 def os_delete(os_id):
     db = get_db()
-    # devolver estoque se essa OS já teve baixa aplicada
-    applied = db.execute(
-        "SELECT inventory_id, qty FROM os_stock_applied WHERE os_id=?",
-        (os_id,),
-    ).fetchall()
-    for it in applied:
-        db.execute("UPDATE inventory SET stock = stock + ? WHERE id=?", (it["qty"], it["inventory_id"]))
-    db.execute("DELETE FROM os_stock_applied WHERE os_id=?", (os_id,))
-
-    db.execute("DELETE FROM order_items WHERE order_id=?", (os_id,))
-    db.execute("DELETE FROM orders WHERE id=?", (os_id,))
-    db.commit()
-    flash(f"OS #{os_id} excluída.", "ok")
-    next_url = request.form.get("next") or url_for("os_list")
-    return redirect(next_url)
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        order = db.execute('SELECT id FROM orders WHERE id=?', (os_id,)).fetchone()
+        if not order:
+            flash('Esta OS já foi excluída ou não foi encontrada.', 'error')
+            return redirect(url_for('os_list'))
+        reconcile_os_stock(db, os_id, 'Cancelada', [])
+        # Mantém o histórico financeiro cancelado e desfaz sua movimentação de estoque.
+        db.execute("DELETE FROM fin_transaction_items WHERE flow='stock' AND tx_id IN (SELECT id FROM fin_transactions WHERE ref_type='OS' AND ref_id=?)", (os_id,))
+        db.execute("UPDATE fin_transactions SET status='CANCELADO',updated_at=? WHERE ref_type='OS' AND ref_id=?", (_now_iso(), os_id))
+        db.execute('DELETE FROM order_items WHERE order_id=?', (os_id,))
+        db.execute('DELETE FROM orders WHERE id=?', (os_id,))
+    flash(f'OS #{os_id} excluída. Estoque estornado e financeiro cancelado.', 'ok')
+    return redirect(safe_next(request.form.get('next'), url_for('os_list')))
 
 
 
@@ -1914,7 +1791,6 @@ def _get_method_id(db, name: str) -> int|None:
     if row:
         return int(row["id"])
     db.execute("INSERT OR IGNORE INTO fin_payment_methods(name) VALUES (?)", (name,))
-    db.commit()
     row = db.execute("SELECT id FROM fin_payment_methods WHERE name = ?", (name,)).fetchone()
     return int(row["id"]) if row else None
 
@@ -1925,7 +1801,6 @@ def _get_category_id(db, name: str) -> int|None:
     if row:
         return int(row["id"])
     db.execute("INSERT OR IGNORE INTO fin_categories(name, kind) VALUES (?, 'both')", (name,))
-    db.commit()
     row = db.execute("SELECT id FROM fin_categories WHERE name = ?", (name,)).fetchone()
     return int(row["id"]) if row else None
 
@@ -2071,7 +1946,8 @@ def sync_os_to_finance(
     cat_id = _get_category_id(db, "Serviços / OS")
 
     tx_status = _tx_status_from_pay(pay_status, os_status)
-    tx_date = _today_iso()
+    order_date = db.execute("SELECT COALESCE(NULLIF(os_date,''),substr(created_at,1,10)) FROM orders WHERE id=?", (os_id,)).fetchone()
+    tx_date = order_date[0] if order_date and order_date[0] else _today_iso()
 
     existing = db.execute(
         "SELECT id FROM fin_transactions WHERE ref_type='OS' AND ref_id=?",
@@ -2127,14 +2003,11 @@ def sync_os_to_finance(
 
     _rebuild_fin_tx_items(db, fin_tx_id, rows)
 
-    try:
-        db.execute("UPDATE orders SET fin_tx_id=? WHERE id=?", (fin_tx_id, os_id))
-    except Exception:
-        pass
+    db.execute("UPDATE orders SET fin_tx_id=? WHERE id=?", (fin_tx_id, os_id))
 
 
-@login_required
 @app.route("/financeiro")
+@login_required
 def financeiro_dashboard():
     db = get_db()
     today = _today_iso()
@@ -2261,8 +2134,8 @@ def financeiro_dashboard():
     )
 
 
-@login_required
 @app.route("/financeiro/lancamentos")
+@login_required
 def financeiro_lancamentos():
     db = get_db()
     today = _today_iso()
@@ -2312,8 +2185,8 @@ def financeiro_lancamentos():
 
 
 
-@login_required
 @app.route("/financeiro/estoque")
+@login_required
 def financeiro_estoque():
     db = get_db()
     today = _today_iso()
@@ -2467,8 +2340,8 @@ def financeiro_estoque():
     )
 
 
-@login_required
 @app.route("/financeiro/lancamentos/<int:tx_id>")
+@login_required
 def financeiro_ver(tx_id):
     db = get_db()
     tx = db.execute(
@@ -2518,8 +2391,8 @@ def financeiro_ver(tx_id):
     )
 
 
-@login_required
 @app.route("/financeiro/lancamentos/novo", methods=["GET","POST"])
+@login_required
 def financeiro_novo():
     db = get_db()
     methods = db.execute("SELECT id, name FROM fin_payment_methods ORDER BY name").fetchall()
@@ -2552,8 +2425,8 @@ def financeiro_novo():
     return render_template("financeiro_form.html", title="Novo lançamento", methods=methods, cats=cats, row=None)
 
 
-@login_required
 @app.route("/financeiro/lancamentos/<int:tx_id>/editar", methods=["GET","POST"])
+@login_required
 def financeiro_editar(tx_id):
     db = get_db()
     row = db.execute("SELECT * FROM fin_transactions WHERE id=?", (tx_id,)).fetchone()
@@ -2600,8 +2473,8 @@ def financeiro_editar(tx_id):
     return render_template("financeiro_form.html", title=f"Editar lançamento #{tx_id}", methods=methods, cats=cats, row=row)
 
 
-@login_required
 @app.route("/financeiro/lancamentos/<int:tx_id>/cancelar", methods=["POST"])
+@login_required
 def financeiro_cancelar(tx_id):
     db = get_db()
     db.execute("UPDATE fin_transactions SET status='CANCELADO', updated_at=? WHERE id=?", (_now_iso(), tx_id))
@@ -2613,8 +2486,8 @@ def financeiro_cancelar(tx_id):
 # --------------------------
 # Serviços avulsos (rápido)
 # --------------------------
-@login_required
 @app.route("/financeiro/servico_avulso", methods=["GET","POST"])
+@login_required
 def servico_avulso():
     db = get_db()
     methods = db.execute("SELECT id, name FROM fin_payment_methods ORDER BY name").fetchall()
@@ -2736,8 +2609,8 @@ def _upsert_purchase_fin_tx(db, purchase_id: int, supplier: str, total: float, d
     return fin_tx_id
 
 
-@login_required
 @app.route("/financeiro/compras")
+@login_required
 def compras_list():
     db = get_db()
     rows = db.execute(
@@ -2751,14 +2624,14 @@ def compras_list():
     return render_template("compras_list.html", title="Compras", rows=rows)
 
 
-@login_required
 @app.route("/financeiro/compras/nova", methods=["GET","POST"])
+@login_required
 def compras_nova():
     return _compras_form(None)
 
 
-@login_required
 @app.route("/financeiro/compras/<int:purchase_id>/editar", methods=["GET","POST"])
+@login_required
 def compras_editar(purchase_id):
     return _compras_form(purchase_id)
 
@@ -2892,8 +2765,8 @@ def _qr_image(data: str):
     buf.seek(0)
     return send_file(buf, mimetype="image/png")
 
-@login_required
 @app.route("/acesso")
+@login_required
 def acesso():
     # URL base para os mecânicos acessarem (mesma rede)
     ip = get_local_ip()
@@ -2914,10 +2787,8 @@ def qr_os_alt(os_id):
 def get_local_ip(default_host: str = "127.0.0.1"):
     """Descobre o IP da rede local para uso nos QRCodes (ex: 10.x, 192.x)."""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
     except Exception:
         return default_host

@@ -1,0 +1,3 @@
+{% if pagination %}
+<div class="pagination noprint"><span>{{ pagination.offset+1 if pagination.count else 0 }}–{{ [pagination.offset+pagination.per_page,pagination.count]|min }} de {{ pagination.count }}</span><div class="actions">{% if pagination.page>1 %}<a class="btn alt small" href="{{ page_url(pagination.page-1) }}" aria-label="Página anterior">← Anterior</a>{% endif %}<span class="page-count">{{ pagination.page }} / {{ pagination.pages }}</span>{% if pagination.page<pagination.pages %}<a class="btn alt small" href="{{ page_url(pagination.page+1) }}" aria-label="Próxima página">Próxima →</a>{% endif %}</div></div>
+{% endif %}

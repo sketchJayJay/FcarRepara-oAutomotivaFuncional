@@ -34,7 +34,7 @@
 
 <div class="glass p-4">
   <div class="grid md:grid-cols-4 gap-2 text-sm">
-    <div><span class="muted">Data:</span> {{ o['created_at'] }}</div>
+    <div><span class="muted">Data:</span> {{ (o['os_date'] or o['created_at'])|datebr }}</div>
     <div><span class="muted">Veículo:</span> {{ o['plate'] or '-' }} {{ o['model'] or '' }}</div>
     <div><span class="muted">Mecânico:</span> {{ o['mech'] or '-' }}</div>
     <div><span class="muted">Status:</span> {{ o['status'] }}</div>
